@@ -1,0 +1,29 @@
+####################################################################
+
+How to use nba_api endpoints example:
+
+Consider the scoreboardv2 endpoint which has:
+- class name: ScoreboardV2
+- parameters: DayOffset, GameDate, LeagueID
+- data sets: available ['Game_ID', 'PT_AVAILABLE']
+             team_leaders ['GAME_ID', 'TEAM_ID', 'TEAM_CITY', ...]
+             ...
+
+https://github.com/swar/nba_api/blob/master/docs/nba_api/stats/endpoints/scoreboardv2.md
+
+Usage:
+
+from nba_api.stats.endpoints import scoreboardv2
+march1 = scoreboardv2.ScoreboardV2(game_date='2020-03-01')
+march1.available.get_data_frame()
+
+      GAME_ID  PT_AVAILABLE
+0  0021900897             1
+1  0021900896             1
+2  0021900898             1
+3  0021900899             1
+4  0021900900             1
+5  0021900901             1
+6  0021900895             1
+
+####################################################################

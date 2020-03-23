@@ -9,8 +9,6 @@ from mongoengine import (
 class Player(Document):
 
     """  NBA Player representation. """
-    id = IntField()
-    full_name = StringField()
-    first_name = StringField()
-    last_name = StringField()
-
+    player_id = IntField()
+    name = StringField()
+    years = ListField()
