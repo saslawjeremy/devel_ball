@@ -21,6 +21,7 @@ class GameDate(Document):
     date = StringField()
     games = ListField()
 
+
 class Season(Document):
 
     """ Season representation. """
