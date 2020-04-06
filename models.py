@@ -54,21 +54,21 @@ class GameTraditionalStats(EmbeddedDocument):
 
     """ Traditional stats for a player or team in a single game. """
     MIN = FloatField()  # Must convert to float, e.g. "7:15" -> 7.25
-    PTS = IntField()
-    FGM = IntField()
-    FGA = IntField()
-    FG3M = IntField()
-    FG3A = IntField()
-    FTM = IntField()
-    FTA = IntField()
-    OREB = IntField()
-    DREB = IntField()
-    AST = IntField()
-    STL = IntField()
-    BLK = IntField()
-    TO = IntField()
-    PF = IntField()
-    PLUS_MINUS = IntField()
+    PTS = FloatField()
+    FGM = FloatField()
+    FGA = FloatField()
+    FG3M = FloatField()
+    FG3A = FloatField()
+    FTM = FloatField()
+    FTA = FloatField()
+    OREB = FloatField()
+    DREB = FloatField()
+    AST = FloatField()
+    STL = FloatField()
+    BLK = FloatField()
+    TO = FloatField()
+    PF = FloatField()
+    PLUS_MINUS = FloatField()
 
 
 class GameAdvancedStats(EmbeddedDocument):
@@ -125,10 +125,10 @@ class PlayerGame(Document):
     """ Representation of a player's stats in a single game """
     game_id = StringField()
     player_id = StringField()
-    team_id = StringField()
-    opposing_team_id = StringField()
     date = StringField()
     home = BooleanField()
+    team_id = StringField()
+    opposing_team_id = StringField()
     traditional_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats = EmbeddedDocumentField(GameAdvancedStats)
     usage_stats = EmbeddedDocumentField(GameUsageStats)
@@ -138,9 +138,10 @@ class TeamGame(Document):
 
     """ Representation of a team's stats in a single game """
     game_id = StringField()
-    team_id = StringField()
     date = StringField()
     home = BooleanField()
+    team_id = StringField()
+    opposing_team_id = StringField()
     traditional_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats = EmbeddedDocumentField(GameAdvancedStats)
 

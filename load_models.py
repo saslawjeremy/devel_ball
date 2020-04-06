@@ -7,11 +7,9 @@ from datetime import (
 )
 import datetime
 from time import sleep
+import numpy as np
 
-from nba_api.stats.static import (
-    players as nba_api_players,
-    teams as nba_api_teams
-)
+from nba_api.stats.static import teams as nba_api_teams
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
     scoreboardv2,
@@ -76,6 +74,53 @@ def add_player_to_db(player_id, player_name, year):
         player_entry.name = player_name
         player_entry.years = [year]
         player_entry.save()
+
+
+def clean_boxscore_df(df, index, str_keys=['PLAYER_ID', 'TEAM_ID']):
+    """
+    Clean a dataframe by:
+    - converting str_keys columns to string
+    - converting all NaNs to 0.0
+    - updating MIN field
+    - setting the index
+
+    :param df: dataframe to clean
+    :type  df: pandas.dataframe
+    :param index: which key to use as index
+    :type  index: str
+    :param str_keys: which columns to convert to strings
+    :type  str_keys: [str]
+    """
+
+    # Convert relevant fields to strings
+    for key in str_keys:
+        try:
+            df[key] = df[key].apply(lambda value: str(value))
+        except KeyError:
+            pass
+    # Update min field from (min:sec) to (minutes) as float
+    try:
+        df['MIN'] = df['MIN'].apply(lambda MIN:
+            np.round(float(MIN.split(':')[0]) + float(MIN.split(':')[1])/60.0, 2) if MIN else 0.0)
+    except KeyError:
+        pass
+    # Update all NaNs to 0.0
+    df = df.fillna(0.0)
+    # Set index of df and return
+    return df.set_index(index)
+
+
+def assign_all_values(mongo_entry, df):
+    """
+    Assign all values for each key that exist in mongo_entry to the same keyed value in df
+
+    :param mongo_entry: entry in mongo to store data
+    :type  mongo_entry: GameTraditionalStats
+    :param df: dataframe which has at least each identical key taht exists in mongo_entry
+    :type  df: pandas.dataframe
+    """
+    for key in mongo_entry:
+        mongo_entry[key] = df[key]
 
 
 def get_teams():
@@ -248,17 +293,25 @@ def get_games(years):
                 road_team_id = str(game_summary['VISITOR_TEAM_ID'][0])
 
                 # Fetch various relevant box scores to use
+                # Traditional box score
                 box_score_traditional = query_nba_api(
                     boxscoretraditionalv2.BoxScoreTraditionalV2, game_id=game_id)
-                players_traditional = box_score_traditional.player_stats.get_data_frame()
-                teams_traditional = box_score_traditional.team_stats.get_data_frame()
+                players_traditional = clean_boxscore_df(
+                    box_score_traditional.player_stats.get_data_frame(), index='PLAYER_ID')
+                teams_traditional = clean_boxscore_df(
+                    box_score_traditional.team_stats.get_data_frame(), index='TEAM_ID')
+                # Advanced box score
                 box_score_advanced = query_nba_api(
                     boxscoreadvancedv2.BoxScoreAdvancedV2, game_id=game_id)
-                players_advanced = box_score_advanced.player_stats.get_data_frame()
-                teams_advanced = box_score_advanced.team_stats.get_data_frame()
+                players_advanced = clean_boxscore_df(
+                    box_score_advanced.player_stats.get_data_frame(), index='PLAYER_ID')
+                teams_advanced = clean_boxscore_df(
+                    box_score_advanced.team_stats.get_data_frame(), index='TEAM_ID')
+                # Usage box score
                 box_score_usage = query_nba_api(
                     boxscoreusagev2.BoxScoreUsageV2, game_id=game_id)
-                players_usage = box_score_usage.sql_players_usage.get_data_frame()
+                players_usage = clean_boxscore_df(
+                    box_score_usage.sql_players_usage.get_data_frame(), index='PLAYER_ID')
 
                 print('\n{}     Loading game: {} vs. {}     {}'
                       .format('#'*10, Team.objects(team_id=home_team_id)[0].name,
@@ -266,17 +319,45 @@ def get_games(years):
 
                 # Create each PlayerGame and map them to player_id
                 player_games = {}
-                for _, player in players_traditional.iterrows():
+                for player_id, player in players_traditional.iterrows():
 
                     # Gather player info and add to db for this year if not already stored
-                    player_id = str(player['PLAYER_ID'])
-                    player_name = str(player['PLAYER_NAME'])
+                    player_name = player['PLAYER_NAME']
                     print("Player: {}  (id: {})".format(player_name, player_id))
                     add_player_to_db(player_id, player_name, year)
 
-
+                    # Create PlayerGame entry to add to this game
                     player_game = PlayerGame(player_id=player_id)
+                    player_games[player_id] = player_game
 
+                    # Store basic data about PlayerGame
+                    player_game.game_id = game_id
+                    player_game.date = date
+                    if player['TEAM_ID'] == home_team_id:
+                        player_game.home = True
+                        player_game.team_id = home_team_id
+                        player_game.opposing_team_id = road_team_id
+                    else:
+                        player_game.home = False
+                        player_game.team_id = road_team_id
+                        player_game.opposing_team_id = home_team_id
+
+                    # Create traditional stats entry for this player
+                    traditional_player_entry = GameTraditionalStats()
+                    player_game.traditional_stats = traditional_player_entry
+                    assign_all_values(traditional_player_entry, player)
+
+                    # Create advanced stats entry for this player
+                    advanced_player_entry = GameAdvancedStats()
+                    player_game.advanced_stats = advanced_player_entry
+                    assign_all_values(advanced_player_entry, players_advanced.loc[player_id])
+
+                    # Create usage stats entry for this player
+                    usage_player_entry = GameUsageStats()
+                    player_game.usage_stats = usage_player_entry
+                    assign_all_values(usage_player_entry, players_usage.loc[player_id])
+
+                import IPython; IPython.embed()
                 print("")
 
 
