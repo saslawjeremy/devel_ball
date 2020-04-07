@@ -25,6 +25,15 @@ class Team(Document):
     """ Team representation. """
     team_id = StringField()
     name = StringField()
+    years = ListField(StringField())
+
+
+class Official(Document):
+
+    """ Official representation. """
+    official_id = StringField()
+    name = StringField()
+    years = ListField(StringField())
 
 
 class Season(Document):
@@ -33,13 +42,6 @@ class Season(Document):
     year = StringField()
     first_date = StringField()
     last_date = StringField()
-
-
-class Official(Document):
-
-    """ Official representation. """
-    official_id = StringField()
-    name = StringField()
 
 
 class GameDate(Document):
@@ -120,7 +122,7 @@ class GameUsageStats(EmbeddedDocument):
     PCT_PTS = FloatField()
 
 
-class PlayerGame(Document):
+class PlayerGame(EmbeddedDocument):
 
     """ Representation of a player's stats in a single game """
     game_id = StringField()
@@ -134,7 +136,7 @@ class PlayerGame(Document):
     usage_stats = EmbeddedDocumentField(GameUsageStats)
 
 
-class TeamGame(Document):
+class TeamGame(EmbeddedDocument):
 
     """ Representation of a team's stats in a single game """
     game_id = StringField()
@@ -151,6 +153,6 @@ class Game(Document):
     """ Game representation. """
     game_id = StringField()
     inactives = ListField(StringField())
-    officials = DictField(ReferenceField(Official))  # Key is str(official_id)
-    player_games = DictField(ReferenceField(PlayerGame))  # Key is str(player_id)
-    team_games = DictField(ReferenceField(TeamGame))  # Key is str(team_id)
+    officials = DictField(ReferenceField(Official))  # Key is official_id
+    player_games = DictField(EmbeddedDocumentField(PlayerGame))  # Key is player_id
+    team_games = DictField(EmbeddedDocumentField(TeamGame))  # Key is team_id

@@ -8,8 +8,8 @@ from datetime import (
 import datetime
 from time import sleep
 import numpy as np
+import pandas as pd
 
-from nba_api.stats.static import teams as nba_api_teams
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
     scoreboardv2,
@@ -74,6 +74,59 @@ def add_player_to_db(player_id, player_name, year):
         player_entry.name = player_name
         player_entry.years = [year]
         player_entry.save()
+    return player_entry
+
+
+def add_team_to_db(team_id, team_name, year):
+    """
+    Add team to db for given year if not already stored
+
+    :param team_id: team's unique id
+    :type  team_id: str
+    :param team_name: team's full name
+    :type  team_name: str
+    :param year: year that team is active
+    :type  year: str
+    """
+
+    team_entry = Team.objects(team_id=team_id)
+    if team_entry:
+        team_entry = team_entry[0]
+        if year not in team_entry.years:
+            team_entry.years.append(year)
+            team_entry.save()
+    else:
+        team_entry = Team(team_id=team_id)
+        team_entry.name = team_name
+        team_entry.years = [year]
+        team_entry.save()
+    return team_entry
+
+
+def add_official_to_db(official_id, official_name, year):
+    """
+    Add official to db for given year if not already stored
+
+    :param official_id: official's unique id
+    :type  official_id: str
+    :param official_name: official's full name
+    :type  official_name: str
+    :param year: year that official is active
+    :type  year: str
+    """
+
+    official_entry = Official.objects(official_id=official_id)
+    if official_entry:
+        official_entry = official_entry[0]
+        if year not in official_entry.years:
+            official_entry.years.append(year)
+            official_entry.save()
+    else:
+        official_entry = Official(official_id=official_id)
+        official_entry.name = official_name
+        official_entry.years = [year]
+        official_entry.save()
+    return official_entry
 
 
 def clean_boxscore_df(df, index, str_keys=['PLAYER_ID', 'TEAM_ID']):
@@ -106,6 +159,9 @@ def clean_boxscore_df(df, index, str_keys=['PLAYER_ID', 'TEAM_ID']):
         pass
     # Update all NaNs to 0.0
     df = df.fillna(0.0)
+    # Convert ints to floats
+    df = df.apply(lambda x: x.astype('float64') if x.name in 
+                  df.select_dtypes(np.integer).keys() else x)
     # Set index of df and return
     return df.set_index(index)
 
@@ -121,24 +177,6 @@ def assign_all_values(mongo_entry, df):
     """
     for key in mongo_entry:
         mongo_entry[key] = df[key]
-
-
-def get_teams():
-    """
-    Load the teams into the database
-    """
-
-    teams = nba_api_teams.get_teams()
-    for team in teams:
-        team_entry = Team.objects(team_id=team['id'])
-        if team_entry:
-            print("{} already in database.".format(team['full_name']))
-        else:
-            team_entry = Team()
-            team_entry.team_id = str(team['id'])
-            team_entry.name = team['full_name']
-            team_entry.save()
-            print("Adding {} to database.".format(team_entry.name))
 
 
 def get_gamedates(years):
@@ -275,17 +313,15 @@ def get_games(years):
                 ]
 
                 # Store officials for this game (create Official if needed)
-                officials = []
-                for _, official in box_score_summary.officials.get_data_frame().iterrows():
-                    official_id = str(official['OFFICIAL_ID'])
-                    official_entry = Official.objects(official_id=official_id)
-                    if not official_entry:
-                        official_entry = Official(official_id=official_id)
-                        official_entry.name = '{} {}'.format(official['FIRST_NAME'],
-                                                             official['LAST_NAME'])
-                        official_entry.save()
-                    officials.append(official_id)
+                officials_df = clean_boxscore_df(
+                    box_score_summary.officials.get_data_frame(), index='OFFICIAL_ID',
+                    str_keys=['OFFICIAL_ID'])
+                officials = {}
                 game.officials = officials
+                for official_id, official in officials_df.iterrows():
+                    official_name = '{} {}'.format(official['FIRST_NAME'], official['LAST_NAME'])
+                    official_entry = add_official_to_db(official_id, official_name, year)
+                    officials[official_id] = official_entry
 
                 # Store home team id and road team id
                 game_summary = box_score_summary.game_summary.get_data_frame()
@@ -313,12 +349,15 @@ def get_games(years):
                 players_usage = clean_boxscore_df(
                     box_score_usage.sql_players_usage.get_data_frame(), index='PLAYER_ID')
 
+                # Log the current game
+                team_names = ['{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
+                              for _, team in teams_traditional.iterrows()]
                 print('\n{}     Loading game: {} vs. {}     {}'
-                      .format('#'*10, Team.objects(team_id=home_team_id)[0].name,
-                              Team.objects(team_id=road_team_id)[0].name, '#'*10))
+                      .format('#'*10, team_names[0], team_names[1], '#'*10))
 
                 # Create each PlayerGame and map them to player_id
                 player_games = {}
+                game.player_games = player_games
                 for player_id, player in players_traditional.iterrows():
 
                     # Gather player info and add to db for this year if not already stored
@@ -357,7 +396,43 @@ def get_games(years):
                     player_game.usage_stats = usage_player_entry
                     assign_all_values(usage_player_entry, players_usage.loc[player_id])
 
-                import IPython; IPython.embed()
+
+                # Create each TeamGame and map them to team_id
+                team_games = {}
+                game.team_games = team_games
+                for team_id, team in teams_traditional.iterrows():
+
+                    # Gather team info and add to db for this year if not already stored
+                    team_name = '{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
+                    print("Team: {}  (id: {})".format(team_name, team_id))
+                    add_team_to_db(team_id, team_name, year)
+
+                    # Create TeamGame entry to add to this game
+                    team_game = TeamGame(team_id=team_id)
+                    team_games[team_id] = team_game
+
+                    # Store basic data about TeamGame
+                    team_game.game_id = game_id
+                    team_game.date = date
+                    if team_id == home_team_id:
+                        team_game.home = True
+                        team_game.opposing_team_id = road_team_id
+                    else:
+                        team_game.home = False
+                        team_game.opposing_team_id = home_team_id
+
+                    # Create traditional stats entry for this team
+                    traditional_team_entry = GameTraditionalStats()
+                    team_game.traditional_stats = traditional_team_entry
+                    assign_all_values(traditional_team_entry, team)
+
+                    # Create advanced stats entry for this team
+                    advanced_team_entry = GameAdvancedStats()
+                    team_game.advanced_stats = advanced_team_entry
+                    assign_all_values(advanced_team_entry, teams_advanced.loc[team_id])
+
+                # Save game
+                game.save()
                 print("")
 
 
@@ -385,8 +460,6 @@ if __name__ == '__main__':
     connect('devel_ball')
 
     # Call the requested data acquiring functions
-    if args.teams:
-        get_teams()
     if args.gamedates:
         get_gamedates(args.years)
     if args.games:
