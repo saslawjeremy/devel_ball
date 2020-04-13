@@ -27,3 +27,11 @@ march1.available.get_data_frame()
 6  0021900895             1
 
 ####################################################################
+
+Pipeline of data loading and post processing (year 2018-19 for example):
+
+python3 load_models.py --gamedates --years 2018-19
+python3 load_models.py --games --years 2018-19
+python3 post_process.py --draftkings --years 2018-19
+
+####################################################################

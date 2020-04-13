@@ -15,7 +15,7 @@ from mongoengine import (
 class Player(Document):
 
     """  NBA Player representation. """
-    player_id = StringField()
+    player_id = StringField(primary_key=True)
     name = StringField()
     years = ListField(StringField())
 
@@ -23,7 +23,7 @@ class Player(Document):
 class Team(Document):
 
     """ Team representation. """
-    team_id = StringField()
+    team_id = StringField(primary_key=True)
     name = StringField()
     years = ListField(StringField())
 
@@ -31,7 +31,7 @@ class Team(Document):
 class Official(Document):
 
     """ Official representation. """
-    official_id = StringField()
+    official_id = StringField(primary_key=True)
     name = StringField()
     years = ListField(StringField())
 
@@ -39,7 +39,7 @@ class Official(Document):
 class Season(Document):
 
     """ Season representation. """
-    year = StringField()
+    year = StringField(primary_key=True)
     first_date = StringField()
     last_date = StringField()
 
@@ -47,8 +47,8 @@ class Season(Document):
 class GameDate(Document):
 
     """  GameDate representation. """
+    date = StringField(primary_key=True)
     year = StringField()
-    date = StringField()
     games = ListField(StringField())
 
 
@@ -125,22 +125,19 @@ class GameUsageStats(EmbeddedDocument):
 class PlayerGame(EmbeddedDocument):
 
     """ Representation of a player's stats in a single game """
-    game_id = StringField()
     player_id = StringField()
-    date = StringField()
     home = BooleanField()
     team_id = StringField()
     opposing_team_id = StringField()
     traditional_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats = EmbeddedDocumentField(GameAdvancedStats)
     usage_stats = EmbeddedDocumentField(GameUsageStats)
+    draftkings_points = FloatField()
 
 
 class TeamGame(EmbeddedDocument):
 
     """ Representation of a team's stats in a single game """
-    game_id = StringField()
-    date = StringField()
     home = BooleanField()
     team_id = StringField()
     opposing_team_id = StringField()
@@ -151,7 +148,9 @@ class TeamGame(EmbeddedDocument):
 class Game(Document):
 
     """ Game representation. """
-    game_id = StringField()
+    game_id = StringField(primary_key=True)
+    date = StringField()
+    year = StringField()
     inactives = ListField(StringField())
     officials = DictField(ReferenceField(Official))  # Key is official_id
     player_games = DictField(EmbeddedDocumentField(PlayerGame))  # Key is player_id

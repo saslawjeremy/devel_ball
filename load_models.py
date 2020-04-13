@@ -2,10 +2,8 @@
 
 from argparse import ArgumentParser
 from mongoengine import connect
-from datetime import (
-    timedelta
-)
 import datetime
+from datetime import timedelta
 from time import sleep
 import numpy as np
 import pandas as pd
@@ -34,7 +32,7 @@ from models import (
 )
 
 
-def query_nba_api(endpoint, sleep_time=1, **kwargs):
+def query_nba_api(endpoint, sleep_time=1, quiet=False, **kwargs):
     """
     Query the nba_api at a safe rate
 
@@ -43,10 +41,11 @@ def query_nba_api(endpoint, sleep_time=1, **kwargs):
     :param sleep_time: amount to sleep before lookup to not overload the server
     :type  sleep_time: int
     """
-    print("Querying nba_api {} with args: {}".format(
-        str(endpoint).split(".")[-1].split('\'')[0],
-        kwargs)
-    )
+    if not quiet:
+        print("Querying nba_api {} with args: {}".format(
+            str(endpoint).split(".")[-1].split('\'')[0],
+            kwargs)
+        )
     sleep(sleep_time)
     return endpoint(**kwargs)
 
@@ -160,7 +159,7 @@ def clean_boxscore_df(df, index, str_keys=['PLAYER_ID', 'TEAM_ID']):
     # Update all NaNs to 0.0
     df = df.fillna(0.0)
     # Convert ints to floats
-    df = df.apply(lambda x: x.astype('float64') if x.name in 
+    df = df.apply(lambda x: x.astype('float64') if x.name in
                   df.select_dtypes(np.integer).keys() else x)
     # Set index of df and return
     return df.set_index(index)
@@ -243,6 +242,8 @@ def get_gamedates(years):
                 gamedate_entry = GameDate()
                 gamedate_entry.date = date
                 gamedate_entry.year = year
+                if '0021201214' in game_ids:  # Remove not played game
+                    game_ids.remove('0021201214')
                 gamedate_entry.games = game_ids
                 gamedate_entry.save()
                 print('Adding {} to database with {} games played on '
@@ -300,6 +301,8 @@ def get_games(years):
                 if game:
                     continue
                 game = Game(game_id=game_id)
+                game.date = date
+                game.year = year
 
                 # Fetch Box Score Summary
                 box_score_summary = query_nba_api(
@@ -370,8 +373,6 @@ def get_games(years):
                     player_games[player_id] = player_game
 
                     # Store basic data about PlayerGame
-                    player_game.game_id = game_id
-                    player_game.date = date
                     if player['TEAM_ID'] == home_team_id:
                         player_game.home = True
                         player_game.team_id = home_team_id
@@ -412,7 +413,6 @@ def get_games(years):
                     team_games[team_id] = team_game
 
                     # Store basic data about TeamGame
-                    team_game.game_id = game_id
                     team_game.date = date
                     if team_id == home_team_id:
                         team_game.home = True
@@ -439,12 +439,13 @@ def get_games(years):
 if __name__ == '__main__':
 
     parser = ArgumentParser()
+    parser.add_argument('--drop', default=[], nargs='*',
+                        help='Which collections to drop, can specify \'all\', '
+                             '\'all-except-game-dates\', or specific collections.'
+                       )
     parser.add_argument('--years', default=['2018-19'], nargs='*',
                         help='Years to acquire player data for. Please use the'
                              ' format xxxx-xx, e.g. 2019-20.'
-                       )
-    parser.add_argument('--teams', action='store_true',
-                        help='Get team data to store under Team collection.'
                        )
     parser.add_argument('--gamedates', action='store_true',
                         help='Get dates and games played on those dates.'
@@ -457,7 +458,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Connect to the local mongo client and devel_ball database
-    connect('devel_ball')
+    mongo_client = connect('devel_ball')
+
+    # Drop specified collections if desired
+    drop = []
+    if 'all' in args.drop:
+        drop = mongo_client['devel_ball'].list_collection_names()
+    elif 'all-except-game-dates' in args.drop:
+        drop = mongo_client['devel_ball'].list_collection_names()
+        drop.remove('game-date')
+        drop.remove('season')
+    else:
+        drop = args.drop
+    for collection in drop:
+        mongo_client['devel_ball'].drop_collection(collection)
 
     # Call the requested data acquiring functions
     if args.gamedates:
