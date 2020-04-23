@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.7
+
 from mongoengine import (
     Document,
     EmbeddedDocument,
@@ -15,25 +17,28 @@ from mongoengine import (
 class Player(Document):
 
     """  NBA Player representation. """
-    player_id = StringField(primary_key=True)
+    unique_id = StringField(primary_key=True)
     name = StringField()
-    years = ListField(StringField())
+    years = DictField(ListField())  # Key is season (str), mapping to an ordered
+                                    # list of games in that season
 
 
 class Team(Document):
 
     """ Team representation. """
-    team_id = StringField(primary_key=True)
+    unique_id = StringField(primary_key=True)
     name = StringField()
-    years = ListField(StringField())
+    years = DictField(ListField())  # Key is season (str), mapping to an ordered
+                                    # list of games in that season
 
 
 class Official(Document):
 
     """ Official representation. """
-    official_id = StringField(primary_key=True)
+    unique_id = StringField(primary_key=True)
     name = StringField()
-    years = ListField(StringField())
+    years = DictField(ListField())  # Key is season (str), mapping to an ordered
+                                    # list of games in that season
 
 
 class Season(Document):

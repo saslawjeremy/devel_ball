@@ -50,82 +50,42 @@ def query_nba_api(endpoint, sleep_time=1, quiet=False, **kwargs):
     return endpoint(**kwargs)
 
 
-def add_player_to_db(player_id, player_name, year):
+def add_entry_to_db(document_type, unique_id, name, year, game_id):
     """
-    Add player to db for given year if not already stored
+    Add Player, Team, or Official entry to database if doesn't exist already.
+    Add the supplied year if it doesn't exist already, and then add the game_id
+    to that year's list of games.
 
-    :param player_id: player's unique id
-    :type  player_id: str
-    :param player_name: player's full name
-    :type  player_name: str
-    :param year: year that player is playing
+    :param document_type: Player, Team, or Official
+    :type  document_type: Mongo Document
+    :param unique_id: player, team, or official's unique id
+    :type  unique_id: str
+    :param name: player's full name, team's full name, or official full name
+    :type  name: str
+    :param year: year that was played in
     :type  year: str
+    :param game_id: id of game
+    :type  game_id: str
     """
 
-    player_entry = Player.objects(player_id=player_id)
-    if player_entry:
-        player_entry = player_entry[0]
-        if year not in player_entry.years:
-            player_entry.years.append(year)
-            player_entry.save()
+    # Fetch entry if it exists, or create it if it doesn't alrady
+    entry = document_type.objects(unique_id=unique_id)
+    if entry:
+        entry = entry[0]
     else:
-        player_entry = Player(player_id=player_id)
-        player_entry.name = player_name
-        player_entry.years = [year]
-        player_entry.save()
-    return player_entry
+        entry = document_type(unique_id=unique_id)
+        entry.name = name
 
+    # Add year to list of years if it doesn't exist yet
+    if year not in entry.years:
+        entry.years[year] = []
 
-def add_team_to_db(team_id, team_name, year):
-    """
-    Add team to db for given year if not already stored
+    # Append game_id to list of games for year
+    entry.years[year].append(game_id)
 
-    :param team_id: team's unique id
-    :type  team_id: str
-    :param team_name: team's full name
-    :type  team_name: str
-    :param year: year that team is active
-    :type  year: str
-    """
-
-    team_entry = Team.objects(team_id=team_id)
-    if team_entry:
-        team_entry = team_entry[0]
-        if year not in team_entry.years:
-            team_entry.years.append(year)
-            team_entry.save()
-    else:
-        team_entry = Team(team_id=team_id)
-        team_entry.name = team_name
-        team_entry.years = [year]
-        team_entry.save()
-    return team_entry
-
-
-def add_official_to_db(official_id, official_name, year):
-    """
-    Add official to db for given year if not already stored
-
-    :param official_id: official's unique id
-    :type  official_id: str
-    :param official_name: official's full name
-    :type  official_name: str
-    :param year: year that official is active
-    :type  year: str
-    """
-
-    official_entry = Official.objects(official_id=official_id)
-    if official_entry:
-        official_entry = official_entry[0]
-        if year not in official_entry.years:
-            official_entry.years.append(year)
-            official_entry.save()
-    else:
-        official_entry = Official(official_id=official_id)
-        official_entry.name = official_name
-        official_entry.years = [year]
-        official_entry.save()
-    return official_entry
+    # Save updated entry
+    entry.save()
+    return entry
 
 
 def clean_boxscore_df(df, index, str_keys=['PLAYER_ID', 'TEAM_ID']):
@@ -323,7 +283,13 @@ def get_games(years):
                 game.officials = officials
                 for official_id, official in officials_df.iterrows():
                     official_name = '{} {}'.format(official['FIRST_NAME'], official['LAST_NAME'])
-                    official_entry = add_official_to_db(official_id, official_name, year)
+                    official_entry = add_entry_to_db(
+                        document_type=Official,
+                        unique_id=official_id,
+                        name=official_name,
+                        year=year,
+                        game_id=game_id
+                    )
                     officials[official_id] = official_entry
 
                 # Store home team id and road team id
@@ -366,7 +332,13 @@ def get_games(years):
                     # Gather player info and add to db for this year if not already stored
                     player_name = player['PLAYER_NAME']
                     print("Player: {}  (id: {})".format(player_name, player_id))
-                    add_player_to_db(player_id, player_name, year)
+                    add_entry_to_db(
+                        document_type=Player,
+                        unique_id=player_id,
+                        name=player_name,
+                        year=year,
+                        game_id=game_id
+                    )
 
                     # Create PlayerGame entry to add to this game
                     player_game = PlayerGame(player_id=player_id)
@@ -406,7 +378,13 @@ def get_games(years):
                     # Gather team info and add to db for this year if not already stored
                     team_name = '{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
                     print("Team: {}  (id: {})".format(team_name, team_id))
-                    add_team_to_db(team_id, team_name, year)
+                    add_entry_to_db(
+                        document_type=Team,
+                        unique_id=team_id,
+                        name=team_name,
+                        year=year,
+                        game_id=game_id
+                    )
 
                     # Create TeamGame entry to add to this game
                     team_game = TeamGame(team_id=team_id)
