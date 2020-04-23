@@ -1,0 +1,18 @@
+collecting stat utils
+
+- go through advanced stats in models.py
+- go through https://www.basketball-reference.com/about/glossary.html
+- use this for verification https://www.basketball-reference.com/boxscores/201810160BOS.html
+- go through https://bleacherreport.com/articles/1039116-understanding-the-nba-explaining-advanced-offensive-stats-and-metrics
+- useful glossary https://stats.nba.com/help/glossary/#ast_ratio
+
+
+stats to use
+
+- advanced stats page
+- POSS (under advanced stats, is the actual number of possessions players by the player or team.  For example, philly played 106 POSS and ben simmons played 85 POSS in 36.82 MIN of play in game 0021800001.  Probably want to turn this into POSS/MIN along with other basic per minute stats.
+
+ideas
+
+- best idea is to turn regular stats into stats/MIN, and then use that, and advanced metrics (that aren't dependent on minutes), to predict fantasy points per minute played.  Then, predict how many minutes a player plays in a game (can use news here too and injuries, etc.), and then multiple expected fantasy points per minute by expected minutes played.
+- can also take stats as a function of stats/POSS (aka how many points/assists/fantasypoints do they expect per possession played), and then predict POSS (possessions played) based on historic data and also team pace, who they're playing against, etc.
