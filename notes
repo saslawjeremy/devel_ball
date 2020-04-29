@@ -16,3 +16,11 @@ ideas
 
 - best idea is to turn regular stats into stats/MIN, and then use that, and advanced metrics (that aren't dependent on minutes), to predict fantasy points per minute played.  Then, predict how many minutes a player plays in a game (can use news here too and injuries, etc.), and then multiple expected fantasy points per minute by expected minutes played.
 - can also take stats as a function of stats/POSS (aka how many points/assists/fantasypoints do they expect per possession played), and then predict POSS (possessions played) based on historic data and also team pace, who they're playing against, etc.
+
+notes on current work
+
+db.getCollection('game').find({'player_games.203967': {$exists: true}}).sort({'date': 1})
+
+1st define models and calculate team stats over the course of the season
+2nd define models and calculate official stats over the course of the season
+3rd calculate PlayerSeason because those stats will rely on having team/official stats
