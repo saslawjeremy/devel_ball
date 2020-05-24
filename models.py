@@ -157,12 +157,52 @@ class Game(Document):
     date = StringField()
     year = StringField()
     inactives = ListField(StringField())
-    officials = DictField(ReferenceField(Official))  # Key is official_id
+    officials = ListField(StringField())
     player_games = DictField(EmbeddedDocumentField(PlayerGame))  # Key is player_id
     team_games = DictField(EmbeddedDocumentField(TeamGame))  # Key is team_id
 
 
-class PlayerSeasonDate(EmbeddedDocument):
+class TeamAdvancedStatsPerGame(EmbeddedDocument):
+    """ Team advanced stats per game on a given day """
+    AST_PCT = FloatField()
+    PACE = FloatField()
+    PIE = FloatField()
+    REB_PCT = FloatField()
+    OREB_PCT = FloatField()
+    DREB_PCT = FloatField()
+    AST_TOV = FloatField()
+    TO_PCT = FloatField()
+    eFG_PCT = FloatField()
+    TS_PCT = FloatField()
+
+
+class TeamSeasonDate(EmbeddedDocument):
+    """ A given day over the course of a season for a specific team.
+        Includes:
+            - basic things about the day such as date, game, opposing team, officials
+            - stats going into that game (basic, advanced)
+    """
+
+    game_id = StringField()
+    date = StringField()
+    season_index = IntField()
+    home = BooleanField()
+    opposing_team_id = StringField()
+    officials = ListField(ReferenceField(Official))
+    traditional_stats_per_game = EmbeddedDocumentField(GameTraditionalStats)
+    advanced_stats_per_game = EmbeddedDocumentField(TeamAdvancedStatsPerGame)
+
+
+class TeamSeason(Document):
+
+    """ A team's stats over a season """
+    team_id = StringField()
+    year = StringField()
+    season_stats = ListField(EmbeddedDocumentField(TeamSeasonDate), default=[])
+
+
+
+#class PlayerSeasonDate(EmbeddedDocument):
     """ A given day over the course of a season for a specific players.
         Includes:
             - basic things about the day such as date, game, teams in game, officials
@@ -171,27 +211,27 @@ class PlayerSeasonDate(EmbeddedDocument):
             - end result (things want to predict) such as min, poss, DK points
     """
 
-    date
-    game_id
-    number_game_of_season  #1st, 2nd, 3rd, 4th, player game of the year
-    team
-    vsTeam
-    officials
+#    date
+#    game_id
+#    number_game_of_season  #1st, 2nd, 3rd, 4th, player game of the year
+#    team
+#    vsTeam
+#    officials
 
-    traditional_per_game_stats
-    traditional_per_minute_stats
-    traditional_per_poss_stats
-    advanced_stats
+#    traditional_per_game_stats
+#    traditional_per_minute_stats
+#    traditional_per_poss_stats
+#    advanced_stats
 
-    min_played = Float
-    POSS_played = Float
-    dk_points = Float
+#    min_played = Float
+#    POSS_played = Float
+#    dk_points = Float
 
 
 
-class PlayerSeason(Document):
+#class PlayerSeason(Document):
 
     """ A player's stats over a season """
-    player_id = StringField()
-    year = StringField()
-    season_stats = ListField(EmbeddedDocumentField(PlayerSeasonDate))
+#    player_id = StringField()
+#    year = StringField()
+#    season_stats = ListField(EmbeddedDocumentField(PlayerSeasonDate))

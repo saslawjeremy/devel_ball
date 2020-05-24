@@ -279,7 +279,7 @@ def get_games(years):
                 officials_df = clean_boxscore_df(
                     box_score_summary.officials.get_data_frame(), index='OFFICIAL_ID',
                     str_keys=['OFFICIAL_ID'])
-                officials = {}
+                officials = []
                 game.officials = officials
                 for official_id, official in officials_df.iterrows():
                     official_name = '{} {}'.format(official['FIRST_NAME'], official['LAST_NAME'])
@@ -290,7 +290,7 @@ def get_games(years):
                         year=year,
                         game_id=game_id
                     )
-                    officials[official_id] = official_entry
+                    officials.append(official_id)
 
                 # Store home team id and road team id
                 game_summary = box_score_summary.game_summary.get_data_frame()

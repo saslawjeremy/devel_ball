@@ -210,7 +210,7 @@ def GAME_SCORE(PTS, FGM, FGA, FTM, FTA, OREB, DREB, STL, AST, BLK, PF, TO):
     """
     Game Score
 
-    Give a rough measure fo a player's productivity for a single game.
+    Give a rough measure of a player's productivity for a single game.
     The scale is similar to that of points scored (40 is outstanding, 10 average)
     """
     return (PTS + 0.4*FGM - 0.7*FGA -0.4*(FTM-FTA) + 0.7*OREB + 0.3*DREB +
