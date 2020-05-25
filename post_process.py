@@ -10,6 +10,10 @@ from models import (
     Season,
     GameDate,
     Game,
+    Official,
+    OfficialStatsPerGame,
+    OfficialSeasonDate,
+    OfficialSeason,
     Team,
     TeamSeason,
     TeamSeasonDate,
@@ -20,7 +24,7 @@ from models import (
 from stat_calculation_utils import *
 from recordclass import recordclass
 
-TotalSeasonStats = recordclass('TotalSeasonStats',
+TotalSeasonTeamStats = recordclass('TotalSeasonTeamStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
         'AST', 'STL', 'BLK', 'TO', 'PF', 'PLUS_MINUS', 'POSS', 'vsMIN', 'vsPTS', 'vsFGM',
         'vsFGA', 'vsFG3M', 'vsFG3A', 'vsFTM', 'vsFTA', 'vsOREB', 'vsDREB', 'vsAST',
@@ -28,6 +32,10 @@ TotalSeasonStats = recordclass('TotalSeasonStats',
     defaults=[0.0]*35
 )
 
+TotalSeasonOfficialStats = recordclass('TotalSeasonOfficialStats',
+    ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FTA', 'POSS'],
+    defaults=[0.0]*8
+)
 
 def add_draftkings(years):
     """
@@ -109,19 +117,98 @@ def add_draftkings(years):
                 # Save game to update draftkings points for each player in the game
                 game.save()
 
+def load_official_stats(stats_per_game, stats):
+    stats_per_game.PTS = stats.PTS/stats.GAMES
+    stats_per_game.FGA = stats.FGA/stats.GAMES
+    stats_per_game.FTA = stats.FTA/stats.GAMES
+    stats_per_game.POSS = stats.POSS/stats.GAMES
+    stats_per_game.PACE = PACE(stats.MIN, stats.POSS/2.0, stats.POSS/2.0)
+    stats_per_game.eFG_PCT = eFG_PCT(stats.FGM, stats.FG3M, stats.FGA)
+    stats_per_game.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
+
+
+def update_official_total_stats(total_stats, team_games):
+    total_stats.GAMES += 1
+    total_stats.MIN += team_games[0].traditional_stats.MIN
+    total_stats.PTS += sum(game.traditional_stats.PTS for game in team_games)
+    total_stats.FGM += sum(game.traditional_stats.FGM for game in team_games)
+    total_stats.FGA += sum(game.traditional_stats.FGA for game in team_games)
+    total_stats.FG3M += sum(game.traditional_stats.FG3M for game in team_games)
+    total_stats.FTA += sum(game.traditional_stats.FTA for game in team_games)
+    total_stats.POSS += sum(game.advanced_stats.POSS for game in team_games)
+
+
+def add_official_season_data(years):
+    """
+    Create data for each official over the course of a given season
+
+    :param years: the years to create team season data
+    :type  years: list[str]
+    """
+
+    for year in years:
+
+        # Get all officials that played in this year
+        officials = Official.objects.filter(__raw__={f'years.{year}': {'$exists': True}})
+        for official in officials:
+            print(f"\n{'*'*20}     Loading {official.name} in year {year}     {'*'*20}\n")
+
+            official_season = OfficialSeason()
+            official_season.official_id = official.id
+            official_season.year = year
+
+            total_stats = TotalSeasonOfficialStats()
+
+            # Iterate over each game that official was in this season
+            for season_index, game_id in enumerate(official.years[year]):
+                game = Game.objects(game_id=game_id)[0]
+
+                season_date = OfficialSeasonDate()
+                season_date.game_id = game_id
+                season_date.date = game.date
+                season_date.season_index = season_index
+
+                if season_index > 0:
+                    season_date.stats_per_game = OfficialStatsPerGame()
+                    load_official_stats(season_date.stats_per_game, total_stats)
+                else:
+                    season_date.stats_per_game = None
+                official_season.season_stats.append(season_date)
+
+                # Get the stats from the game
+                team_games = list(game.team_games.values())
+                print(f"Game {season_index}: "
+                      f"{Team.objects(unique_id=team_games[0].team_id)[0].name} vs. "
+                      f"{Team.objects(unique_id=team_games[1].team_id)[0].name}")
+
+                # Update total season stats for future calculations
+                update_official_total_stats(total_stats, team_games)
+
+            official_season.save()
+
 def load_team_advanced_stats(game_advanced_stats, stats):
     game_advanced_stats.AST_PCT = TmAST_PCT(stats.AST, stats.FGM)
     game_advanced_stats.PACE = PACE(stats.MIN, stats.POSS, stats.vsPOSS)
-    import IPython; IPython.embed()
     game_advanced_stats.PIE = PIE(
-        stats.PTS, stats.FGM, stats.FTM, stats.FTA, stats.DREB, stats.OREB, stats.AST, stats.STL,
-        stats.BLK, stats.PF, stats.TO, stats.PTS+stats.vsPTS, stats.FGM+stats.vsFGM,
-        stats.FTM+stats.vsFTM, stats.FGA+stats.vsFGA, stats.FTA+stats.vsFTA, stats.DREB+stats.vsDREB,
-        stats.OREB+stats.vsOREB, stats.AST+stats.vsAST, stats.STL+stats.vsSTL, stats.BLK+stats.vsBLK,
+        stats.PTS, stats.FGM, stats.FTM, stats.FGA, stats.FTA, stats.DREB, stats.OREB,
+        stats.AST, stats.STL, stats.BLK, stats.PF, stats.TO, stats.PTS+stats.vsPTS,
+        stats.FGM+stats.vsFGM, stats.FTM+stats.vsFTM, stats.FGA+stats.vsFGA,
+        stats.FTA+stats.vsFTA, stats.DREB+stats.vsDREB, stats.OREB+stats.vsOREB,
+        stats.AST+stats.vsAST, stats.STL+stats.vsSTL, stats.BLK+stats.vsBLK,
         stats.PF+stats.vsPF, stats.TO+stats.vsTO)
+    game_advanced_stats.REB_PCT = REB_PCT(stats.MIN, stats.OREB+stats.DREB, stats.MIN*5.0,
+        stats.OREB+stats.DREB, stats.vsOREB+stats.vsDREB)
+    game_advanced_stats.OREB_PCT = REB_PCT(stats.MIN, stats.OREB, stats.MIN*5.0,
+        stats.OREB, stats.vsDREB)
+    game_advanced_stats.DREB_PCT = REB_PCT(stats.MIN, stats.DREB, stats.MIN*5.0,
+        stats.DREB, stats.vsOREB)
+    game_advanced_stats.AST_TO = AST_TOV(stats.AST, stats.TO)
+    game_advanced_stats.TO_PCT = TO_PCT(stats.TO, stats.FGA, stats.FTA)
+    game_advanced_stats.eFG_PCT = eFG_PCT(stats.FGM, stats.FG3M, stats.FGA)
+    game_advanced_stats.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
 
 
-def update_total_stats(total_stats, team_game, vs_team_game):
+def update_team_total_stats(total_stats, team_game, vs_team_game):
     total_stats.GAMES += 1
     for stat in team_game.traditional_stats:
         total_stats[stat] += team_game.traditional_stats[stat]
@@ -150,7 +237,7 @@ def add_team_season_data(years):
             team_season.team_id = team.id
             team_season.year = year
 
-            total_stats = TotalSeasonStats()
+            total_stats = TotalSeasonTeamStats()
 
             # Iterate over each game that team played in this season
             for season_index, game_id in enumerate(team.years[year]):
@@ -185,8 +272,9 @@ def add_team_season_data(years):
                 team_season.season_stats.append(season_date)
 
                 # Update total season stats for future calculations
-                update_total_stats(total_stats, team_game, vs_team_game)
+                update_team_total_stats(total_stats, team_game, vs_team_game)
 
+            team_season.save()
 
 if __name__ == '__main__':
 
@@ -201,6 +289,9 @@ if __name__ == '__main__':
     parser.add_argument('--team-seasons', action='store_true',
                         help='Create day by day team statistics for each team in the given years.'
                        )
+    parser.add_argument('--official-seasons', action='store_true',
+                        help='Create day by day team statistics for each official in the given years.'
+                       )
     args = parser.parse_args()
 
     # Connect to the local mongo client and devel_ball database
@@ -209,5 +300,7 @@ if __name__ == '__main__':
     # Call the requested data acquiring functions
     if args.draftkings:
         add_draftkings(args.years)
+    if args.official_seasons:
+        add_official_season_data(args.years)
     if args.team_seasons:
         add_team_season_data(args.years)

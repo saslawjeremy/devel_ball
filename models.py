@@ -162,6 +162,38 @@ class Game(Document):
     team_games = DictField(EmbeddedDocumentField(TeamGame))  # Key is team_id
 
 
+class OfficialStatsPerGame(EmbeddedDocument):
+    """ Official stats per game on a given day """
+    PTS = FloatField()
+    FGA = FloatField()
+    FTA = FloatField()
+    POSS = FloatField()
+    PACE = FloatField()
+    eFG_PCT = FloatField()
+    TS_PCT = FloatField()
+
+
+class OfficialSeasonDate(EmbeddedDocument):
+    """ A given day over the course of a season for a specific official.
+        Includes:
+            - basic things about the day such as date and game
+            - stats going into that game
+    """
+
+    game_id = StringField()
+    date = StringField()
+    season_index = IntField()
+    stats_per_game = EmbeddedDocumentField(OfficialStatsPerGame)
+
+
+class OfficialSeason(Document):
+
+    """ An official's stats over a season """
+    official_id = StringField()
+    year = StringField()
+    season_stats = ListField(EmbeddedDocumentField(OfficialSeasonDate), default=[])
+
+
 class TeamAdvancedStatsPerGame(EmbeddedDocument):
     """ Team advanced stats per game on a given day """
     AST_PCT = FloatField()
@@ -188,7 +220,7 @@ class TeamSeasonDate(EmbeddedDocument):
     season_index = IntField()
     home = BooleanField()
     opposing_team_id = StringField()
-    officials = ListField(ReferenceField(Official))
+    officials = ListField(StringField())
     traditional_stats_per_game = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats_per_game = EmbeddedDocumentField(TeamAdvancedStatsPerGame)
 

@@ -301,7 +301,7 @@ def AST_TOV(AST, TO):
     The number of assists for a player or team compared to the number of
     turnovers they have committed
     """
-    return AST/TOV
+    return AST/TO
 
 
 def TO_PCT(TO, FGA, FTA):
