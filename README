@@ -33,5 +33,8 @@ Pipeline of data loading and post processing (year 2018-19 for example):
 python3 load_models.py --gamedates --years 2018-19
 python3 load_models.py --games --years 2018-19
 python3 post_process.py --draftkings --years 2018-19
+python3 post_process.py --official-seasons --years 2018-19
+python3 post_process.py --team-seasons --years 2018-19
+python3 post_process.py --player-seasons --years 2018-19
 
 ####################################################################

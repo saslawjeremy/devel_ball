@@ -169,9 +169,6 @@ def add_official_season_data(years):
         for official in officials:
             print(f"\n{'*'*20}     Loading {official.name} in year {year}     {'*'*20}\n")
 
-            existing_official_season = OfficialSeason.objects(official_id=official.id, year=year)
-            if len(existing_official_season) > 0:
-                existing_official_season[0].delete()
             official_season = OfficialSeason()
             official_season.official_id = official.id
             official_season.year = year
@@ -203,6 +200,9 @@ def add_official_season_data(years):
                 # Update total season stats for future calculations
                 update_official_total_stats(total_stats, team_games)
 
+            existing_official_season = OfficialSeason.objects(official_id=official.id, year=year)
+            if len(existing_official_season) > 0:
+                existing_official_season[0].delete()
             official_season.save()
 
 def load_team_advanced_stats(game_advanced_stats, stats):
@@ -252,9 +252,6 @@ def add_team_season_data(years):
         for team in teams:
             print(f"\n{'*'*20}     Loading {team.name} in year {year}     {'*'*20}\n")
 
-            existing_team_season = TeamSeason.objects(team_id=team.id, year=year)
-            if len(existing_team_season) > 0:
-                existing_team_season[0].delete()
             team_season = TeamSeason()
             team_season.team_id = team.id
             team_season.year = year
@@ -296,6 +293,9 @@ def add_team_season_data(years):
                 # Update total season stats for future calculations
                 update_team_total_stats(total_stats, team_game, vs_team_game)
 
+            existing_team_season = TeamSeason.objects(team_id=team.id, year=year)
+            if len(existing_team_season) > 0:
+                existing_team_season[0].delete()
             team_season.save()
 
 
@@ -378,9 +378,6 @@ def add_player_season_data(years):
         for player in players:
             print(f"\n{'*'*20}     Loading {player.name} in year {year}     {'*'*20}\n")
 
-            existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
-            if len(existing_player_season) > 0:
-                existing_player_season[0].delete()
             player_season = PlayerSeason()
             player_season.player_id = player.id
             player_season.year = year
@@ -431,6 +428,9 @@ def add_player_season_data(years):
                 opposing_team_game = game.team_games[player_game.opposing_team_id]
                 update_player_total_stats(total_stats, player_game, team_game, opposing_team_game)
 
+            existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
+            if len(existing_player_season) > 0:
+                existing_player_season[0].delete()
             player_season.save()
 
 if __name__ == '__main__':

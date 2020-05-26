@@ -148,7 +148,6 @@ def get_gamedates(years):
 
     # For each specified year, look at the dates and games played on them
     for year in years:
-
         season_entry = Season()
         season_entry.year = year
 
