@@ -11,8 +11,10 @@ def AST_PCT(AST, MIN, FGM, TmMIN, TmFGM):
     Estimate of the percentage of teammate field goals a player assisted while
     he was on the floor
     """
-    return AST / (( (MIN/(TmMIN/5.0)) * TmFGM) - FGM)
-
+    if MIN > 0.0:
+        return AST / (( (MIN/(TmMIN/5.0)) * TmFGM) - FGM)
+    else:
+        return 0.0
 
 def PER(FGM, FGA, STL, FG3M, FTM, FTA, BLK, OREB, AST, DREB, PF, TO, MIN):
     """
@@ -21,19 +23,21 @@ def PER(FGM, FGA, STL, FG3M, FTM, FTA, BLK, OREB, AST, DREB, PF, TO, MIN):
     Overall rating of a player's per-minute stastical production.
     League average is 15.00 every season
     """
-    return (FGM*85.910
-            + STL*53.897
-            + FG3M*51.757
-            + FTM*46.845
-            + BLK*39.190
-            + OREB*39.190
-            + AST*34.677
-            + DREB*14.707
-            - PF*17.174
-            - (FTA-FTM)*20.091
-            - (FGA-FGM)*39.190
-            - TO*53.897)/MIN
-
+    if MIN > 0.0:
+        return (FGM*85.910
+                + STL*53.897
+                + FG3M*51.757
+                + FTM*46.845
+                + BLK*39.190
+                + OREB*39.190
+                + AST*34.677
+                + DREB*14.707
+                - PF*17.174
+                - (FTA-FTM)*20.091
+                - (FGA-FGM)*39.190
+                - TO*53.897)/MIN
+    else:
+        return 0.0
 
 def USG_PCT(FGA, FTA, TO, MIN, TmMIN, TmFGA, TmFTA, TmTO):
     """
@@ -41,13 +45,15 @@ def USG_PCT(FGA, FTA, TO, MIN, TmMIN, TmFGA, TmFTA, TmTO):
 
     Estimate of percentage of team plays used by a player when he was on floor
     """
-    return (((FGA + 0.44*FTA + TO) * TmMIN/5) /
-             (MIN * (TmFGA + 0.44*TmFTA + TmTO)))
-
+    if MIN > 0.0:
+        return (((FGA + 0.44*FTA + TO) * TmMIN/5) /
+                 (MIN * (TmFGA + 0.44*TmFTA + TmTO)))
+    else:
+        return 0.0
 
 def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
                      TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB,
-                     TmAST, TmTO, TmOREB_PCT):
+                     TmAST, TmTO, vsTmDREB):
     """
     Helper function to get internal statistics useful for multiple stats
     """
@@ -55,15 +61,21 @@ def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
     # Assist adjustment factor is the quantity of field goals assisted by
     # teammates while the player of interest is in the game plus the expected
     # rate of assists per field goal made for the player of interest
-    qAST = (((MIN / (TmMIN/5.0)) * (1.14 * ((TmAST - AST) / TmFGM))) +
-            ((((TmAST / TmMIN) * MIN * 5.0 - AST) / ((TmFGM / TmMIN) * MIN * 5.0 - FGM))
-               * (1.0 - (MIN / (TmMIN / 5.0)))))
+    if MIN > 0.0:
+        qAST = (((MIN / (TmMIN/5.0)) * (1.14 * ((TmAST - AST) / TmFGM))) +
+                ((((TmAST / TmMIN) * MIN * 5.0 - AST) / ((TmFGM / TmMIN) * MIN * 5.0 - FGM))
+                   * (1.0 - (MIN / (TmMIN / 5.0)))))
+    else:
+        qAST = 0.0
 
     # Possessions ending due to field goals
     TmScoringPoss = TmFGM + (1.0 - (1.0 - (TmFTM/TmFTA))**2.0) * TmFTA * 0.4
 
     # Number of scoring possessions divded by number of possessions played
     TmPlayPct = TmScoringPoss / (TmFGA + TmFTA*0.4 + TmTO)
+
+    # Team offensive rebound percentage
+    TmOREB_PCT = OREB_PCT(TmMIN, TmOREB, TmMIN*5.0, TmOREB, vsTmDREB)
 
     # Percentage of offensive rebounds obtained from the total number of
     # possible rebounds of an offensive possession
@@ -72,13 +84,19 @@ def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
         ((1.0 - TmOREB_PCT) * TmPlayPct + TmOREB_PCT*(1.0-TmPlayPct)))
 
     # Identify the points produced by a player with respect to field goals made
-    FG_Part = FGM * (1.0 - 0.5 * ((PTS - FTM) / (2.0 * FGA)) * qAST)
+    if FGA > 0.0 and qAST > 0.0:
+        FG_Part = FGM * (1.0 - 0.5 * ((PTS - FTM) / (2.0 * FGA)) * qAST)
+    else:
+        FG_Part = 0.0
 
     # Identify the assists produced by a player
     AST_Part = 0.5 * (((TmPTS - TmFTM) - (PTS - FTM)) / (2.0 * (TmFGA - FGA))) * AST
 
     # Free throw part
-    FT_Part = (1.0 - (1.0 - (FTM/FTA))**2) * 0.4 * FTA
+    if FTA > 0.0:
+        FT_Part = (1.0 - (1.0 - (FTM/FTA))**2) * 0.4 * FTA
+    else:
+        FT_Part = 0.0
 
     # Offensive rebounding part
     OREB_Part = OREB * TmOREB_Weight * TmPlayPct
@@ -89,7 +107,10 @@ def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
 
     # Missed FG and FT Possessions
     missed_FG_POSS = (FGA - FGM) * (1.0 - 1.07*TmOREB_PCT)
-    missed_FT_POSS = ((1.0 - (FTM/FTA))**2.0) * 0.4 * FTA
+    if FTA > 0.0:
+        missed_FT_POSS = ((1.0 - (FTM/FTA))**2.0) * 0.4 * FTA
+    else:
+        missed_FT_POSS = 0.0
 
     # Total Possessions
     TotPoss = ScPoss + missed_FG_POSS + missed_FT_POSS + TO
@@ -97,12 +118,13 @@ def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
     # Return named tuple with relevant stats
     helper_stats = namedtuple(
         'HelperStats',
-        ['qAST', 'TmScoringPoss', 'TmPlayPct', 'TmOREB_Weight', 'ScPoss',
+        ['qAST', 'TmScoringPoss', 'TmPlayPct', 'TmOREB_PCT', 'TmOREB_Weight', 'ScPoss',
             'TotPoss']
     )
     helper_stats.qAST = qAST
     helper_stats.TmScoringPoss = TmScoringPoss
     helper_stats.TmPlayPct = TmPlayPct
+    helper_stats.TmOREB_PCT = TmOREB_PCT
     helper_stats.TmOREB_Weight = TmOREB_Weight
     helper_stats.ScPoss = ScPoss
     helper_stats.TotPoss = TotPoss
@@ -111,7 +133,7 @@ def _advanced_helper(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
 
 def OFF_RTG(MIN, PTS, FGM, FGA, FG3M, FTM, FTA, OREB, AST, TO,
             TmMIN, TmPTS, TmFGM, TmFGA, TmFG3M, TmFTM, TmFTA, TmOREB,
-            TmAST, TmTO, TmOREB_PCT):
+            TmAST, TmTO, vsTmDREB):
     """
     Offensive Rating
 
@@ -127,15 +149,19 @@ def OFF_RTG(MIN, PTS, FGM, FGA, FG3M, FTM, FTA, OREB, AST, TO,
 
     helper_stats =  _advanced_helper(
         MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
-        TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB, TmAST, TmTO, TmOREB_PCT)
+        TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB, TmAST, TmTO, vsTmDREB)
     qAST = helper_stats.qAST
     TmScoringPoss = helper_stats.TmScoringPoss
     TmPlayPct = helper_stats.TmPlayPct
+    TmOREB_PCT = helper_stats.TmOREB_PCT
     TmOREB_Weight = helper_stats.TmOREB_Weight
     TotPoss = helper_stats.TotPoss
 
     # Points produced off field goals
-    PProd_FG_Part = 2.0 * (FGM + 0.5*FG3M) * (1.0 - 0.5 *((PTS-FTM) / (2*FGA)) * qAST)
+    if FGA > 0.0:
+        PProd_FG_Part = 2.0 * (FGM + 0.5*FG3M) * (1.0 - 0.5 *((PTS-FTM) / (2*FGA)) * qAST)
+    else:
+        PProd_FG_Part = 0.0
 
     # Points produced off assists
     PProd_AST_Part = (2.0 * ((TmFGM - FGM + 0.5*(TmFG3M - FG3M)) / (TmFGM - FGM))
@@ -151,13 +177,16 @@ def OFF_RTG(MIN, PTS, FGM, FGA, FG3M, FTM, FTA, OREB, AST, TO,
              + PProd_OREB_Part)
 
     # Calculate offensive rating
-    ORtg = 100.0 * (PProd / TotPoss)
+    if TotPoss > 0.0:
+        ORtg = 100.0 * (PProd / TotPoss)
+    else:
+        ORtg = 0.0
     return ORtg
 
 
 def FLOOR_PCT(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
               TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB,
-              TmAST, TmTO, TmOREB_PCT):
+              TmAST, TmTO, vsTmDREB):
     """
     Floor Percentage
 
@@ -166,11 +195,14 @@ def FLOOR_PCT(MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
 
     helper_stats =  _advanced_helper(
         MIN, PTS, FGM, FGA, FTM, FTA, OREB, AST, TO,
-        TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB, TmAST, TmTO, TmOREB_PCT)
+        TmMIN, TmPTS, TmFGM, TmFGA, TmFTM, TmFTA, TmOREB, TmAST, TmTO, vsTmDREB)
     ScPoss = helper_stats.ScPoss
     TotPoss = helper_stats.TotPoss
 
-    FLOOR_PCT = ScPoss/TotPoss
+    if TotPoss > 0.0:
+        FLOOR_PCT = ScPoss/TotPoss
+    else:
+        FLOOR_PCT = 0.0
     return FLOOR_PCT
 
 
@@ -197,7 +229,10 @@ def DEF_RTG(MIN, STL, BLK, DREB, PF,
 
     Stops = Stops1 + Stops2
 
-    Stop_PCT = (Stops * vsTmMIN) / (TmPOSS*MIN)
+    if MIN > 0.0:
+        Stop_PCT = (Stops * vsTmMIN) / (TmPOSS*MIN)
+    else:
+        Stop_PCT = 0.0
 
     TmDEF_RTG = 100 * (vsTmPTS/TmPOSS)
     D_Pts_per_ScPoss = vsTmPTS / (vsTmFGM + (1.0 - (1.0 - (vsTmFTM/vsTmFTA))**2) * vsTmFTA*0.4)
@@ -267,8 +302,10 @@ def REB_PCT(MIN, REB, TmMIN, TmREB, vsTmREB):
 
     MIN and REB apply to player or team
     """
-    return (REB * (TmMIN/5.0))/(MIN * (TmREB + vsTmREB))
-
+    if MIN > 0.0:
+        return (REB * (TmMIN/5.0))/(MIN * (TmREB + vsTmREB))
+    else:
+        return 0.0
 
 def OREB_PCT(MIN, OREB, TmMIN, TmOREB, vsTmDREB):
     """
@@ -279,8 +316,10 @@ def OREB_PCT(MIN, OREB, TmMIN, TmOREB, vsTmDREB):
 
     MIN and OREB apply to player or team
     """
-    return (OREB * (TmMIN/5.0))/(MIN * (TmOREB + vsTmDREB))
-
+    if MIN > 0.0:
+        return (OREB * (TmMIN/5.0))/(MIN * (TmOREB + vsTmDREB))
+    else:
+        return 0.0
 
 def DREB_PCT(MIN, DREB, TmMIN, TmDREB, vsTmOREB):
     """
@@ -291,8 +330,10 @@ def DREB_PCT(MIN, DREB, TmMIN, TmDREB, vsTmOREB):
 
     MIN and DREB apply to player or team
     """
-    return (DREB * (TmMIN/5.0))/(MIN * (TmDREB + vsTmOREB))
-
+    if MIN > 0.0:
+        return (DREB * (TmMIN/5.0))/(MIN * (TmDREB + vsTmOREB))
+    else:
+        return 0.0
 
 def AST_TOV(AST, TO):
     """
@@ -301,8 +342,10 @@ def AST_TOV(AST, TO):
     The number of assists for a player or team compared to the number of
     turnovers they have committed
     """
-    return AST/TO
-
+    if TO > 0.0:
+        return AST/TO
+    else:
+        return 0.0
 
 def TO_PCT(TO, FGA, FTA):
     """
@@ -310,8 +353,10 @@ def TO_PCT(TO, FGA, FTA):
 
     Percentage of plays that end in a player or team's turnover
     """
-    return TO/(FGA + 0.44*FTA + TO)
-
+    if FGA > 0.0 or FTA > 0.0 or TO > 0.0:
+        return TO/(FGA + 0.44*FTA + TO)
+    else:
+        return 0.0
 
 def eFG_PCT(FGM, FG3M, FGA):
     """
@@ -319,8 +364,10 @@ def eFG_PCT(FGM, FG3M, FGA):
 
     Measures field goal percentage taking into account 3 pointers worth more
     """
-    return (FGM + 0.5*FG3M)/FGA
-
+    if FGA > 0.0:
+        return (FGM + 0.5*FG3M)/FGA
+    else:
+        return 0.0
 
 def TS_PCT(PTS, FGA, FTA):
     """
@@ -328,6 +375,9 @@ def TS_PCT(PTS, FGA, FTA):
 
     Shooting percentage taking into account FG, 3FG, and FT
     """
-    return PTS/(2.0*FGA + 0.88*FTA)
+    if FGA > 0.0 or FTA>0.0:
+        return PTS/(2.0*FGA + 0.88*FTA)
+    else:
+        return 0.0
 
 
