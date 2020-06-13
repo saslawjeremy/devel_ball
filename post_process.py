@@ -206,6 +206,7 @@ def add_official_season_data(years):
             official_season.save()
 
 def load_team_advanced_stats(game_advanced_stats, stats):
+    game_advanced_stats.POSS = stats.POSS/stats.GAMES
     game_advanced_stats.AST_PCT = TmAST_PCT(stats.AST, stats.FGM)
     game_advanced_stats.PACE = PACE(stats.MIN, stats.POSS, stats.vsPOSS)
     game_advanced_stats.PIE = PIE(

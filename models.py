@@ -196,6 +196,7 @@ class OfficialSeason(Document):
 
 class TeamAdvancedStatsPerGame(EmbeddedDocument):
     """ Team advanced stats per game on a given day """
+    POSS = FloatField()
     AST_PCT = FloatField()
     PACE = FloatField()
     PIE = FloatField()
