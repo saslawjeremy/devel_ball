@@ -154,9 +154,10 @@ def create_raw_dataframe(years):
     data = pd.DataFrame(columns=GAME_VALUES)
 
     player_seasons = PlayerSeason.objects(year__in=years)
-    for player_season in player_seasons:
-
-        print(f'Loading {Player.objects(pk=player_season.player_id)[0].name} in {player_season.year}')
+    total_num = len(player_seasons)
+    for i, player_season in enumerate(player_seasons):
+        print(f'Loading {Player.objects(pk=player_season.player_id)[0].name} in '
+              f'{player_season.year}   ({i}/{total_num})')
         season_stats = player_season.season_stats
 
         for player_game in season_stats:
@@ -197,7 +198,7 @@ def create_raw_dataframe(years):
             game_dict = get_game_dict(player_game, team_game, vsTeam_game, official_stats)
             data = data.append(game_dict, ignore_index=True)
 
-        print(data)
+    data.to_pickle(f'{years}.p')
 
 if __name__ == '__main__':
 
