@@ -16,3 +16,4 @@ python3 post_process.py --draftkings --years $YEAR
 python3 post_process.py --official-seasons --years $YEAR
 python3 post_process.py --team-seasons --years $YEAR
 python3 post_process.py --player-seasons --years $YEAR
+python3 create_pandas.py --years $YEAR
