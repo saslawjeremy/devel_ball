@@ -23,8 +23,8 @@ GAME_VALUES = [
     'DK_POINTS', 'MIN', 'POSS',
 
     # Player traditional stats per game
-    'PTSpg', 'FGMpg', 'FGApg', 'FG3Mpg', 'FG3Apg', 'FTMpg', 'FTApg', 'OREBpg',
-    'DREBpg', 'REBpg', 'ASTpg', 'STLpg', 'BLKpg', 'TOpg', 'PFpg', 'PLUS_MINUSpg',
+    'MINpg', 'POSSpg', 'PTSpg', 'FGMpg', 'FGApg', 'FG3Mpg', 'FG3Apg', 'FTMpg', 'FTApg',
+    'OREBpg', 'DREBpg', 'REBpg', 'ASTpg', 'STLpg', 'BLKpg', 'TOpg', 'PFpg', 'PLUS_MINUSpg',
 
     # Player traditional stats per minute
     'PTSpm', 'FGMpm', 'FGApm', 'FG3Mpm', 'FG3Apm', 'FTMpm', 'FTApm', 'OREBpm',
@@ -76,10 +76,9 @@ def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
 
     # Set player traditional stats per game
     for key, value in player_game.per_game_stats.to_mongo().iteritems():
-        if key == 'MIN':
-            continue
         game_dict[f'{key}pg'] = value
     game_dict['REBpg'] = game_dict['OREBpg'] + game_dict['DREBpg']
+    game_dict['POSSpg'] = player_game.advanced_stats_per_game.to_mongo()['POSS']
 
     # Set player traditional stats per minute
     for key, value in player_game.per_minute_stats.to_mongo().iteritems():

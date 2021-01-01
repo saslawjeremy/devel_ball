@@ -236,6 +236,7 @@ class TeamSeason(Document):
 
 class PlayerAdvancedStatsPerGame(EmbeddedDocument):
     """ Player advanced stats per game on a given day """
+    POSS = FloatField()
     AST_PCT = FloatField()
     PER = FloatField()
     USG_PCT = FloatField()

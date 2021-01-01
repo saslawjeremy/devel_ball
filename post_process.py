@@ -315,6 +315,7 @@ def load_player_stats(season_date, stats):
         else:
             season_date.per_possession_stats[stat] = 0.0
     advanced_stats = season_date.advanced_stats_per_game
+    advanced_stats.POSS = stats.POSS/stats.GAMES
     advanced_stats.AST_PCT = AST_PCT(stats.AST, stats.MIN, stats.FGM, stats.TmMIN, stats.TmFGM)
     advanced_stats.PER = PER(stats.FGM, stats.FGA, stats.STL, stats.FG3M, stats.FTM, stats.FTA,
         stats.BLK, stats.OREB, stats.AST, stats.DREB, stats.PF, stats.TO, stats.MIN)
