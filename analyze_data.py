@@ -97,8 +97,10 @@ if __name__ == '__main__':
         ('cat', OrdinalEncoder(), cat_attribs),
     ])
 
-    data_X_prepared_np = full_pipeline.fit_transform(data_X)
+    data_X_prepared_np = num_pipeline.fit_transform(data_X)
     data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, data_X.columns)
+    import IPython; IPython.embed()
+
     print(data_X_prepared)
 
     from sklearn.linear_model import LinearRegression

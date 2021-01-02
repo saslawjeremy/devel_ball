@@ -148,7 +148,7 @@ def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
     return game_dict
 
 
-def create_raw_dataframe(years):
+def create_raw_dataframe(years, pickle_name):
 
     data = pd.DataFrame(columns=GAME_VALUES)
 
@@ -196,8 +196,9 @@ def create_raw_dataframe(years):
 
             game_dict = get_game_dict(player_game, team_game, vsTeam_game, official_stats)
             data = data.append(game_dict, ignore_index=True)
+        break
 
-    data.to_pickle(f'{years}.p')
+    data.to_pickle(pickle_name if pickle_name else f'{years}.p')
 
 if __name__ == '__main__':
 
@@ -206,8 +207,9 @@ if __name__ == '__main__':
                         help='Years to acquire player data for. Please use the'
                              ' format xxxx-xx, e.g. 2019-20.'
                        )
+    parser.add_argument('--name', default=None, help='Name for the pickle')
     args = parser.parse_args()
 
     # Connect to the local mongo client and devel_ball database
     mongo_client = connect('devel_ball')
-    create_raw_dataframe(args.years)
+    create_raw_dataframe(args.years, args.name)
