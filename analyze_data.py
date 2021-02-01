@@ -79,7 +79,7 @@ if __name__ == '__main__':
     #data = data.sample(frac=1)
 
     # Remove non-players
-    data = data[data['MINpg'] > 30.]
+    data = data[data['MINpg'] > 10.]
     data = data[data['MIN'] > 0.0]
     data['DK_POINTS_PER_MIN'] = np.where(data['MIN'] == 0.0, 0.0, data['DK_POINTS'] / data['MIN'])
     data['DK_POINTS_PER_POSS'] = np.where(data['POSS'] == 0.0, 0.0, data['DK_POINTS'] / data['POSS'])
