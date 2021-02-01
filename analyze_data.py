@@ -1,5 +1,6 @@
 #!/usr/bin/env python3.7
 
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -13,8 +14,15 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
     OrdinalEncoder,
     MinMaxScaler,
+    PolynomialFeatures,
 )
-
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from sklearn.model_selection import cross_val_score
+from tensorflow import keras
+import talos
+import pickle
 
 class NegativeValueRemover(BaseEstimator, TransformerMixin):
     """
@@ -43,7 +51,7 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
     Custom transformer to remove outliers from the dataset.
     """
 
-    def __init__(self, std_devs_for_outlier=4):
+    def __init__(self, std_devs_for_outlier=20):
         self.std_devs_for_outlier = std_devs_for_outlier
 
     def fit(self, X, y=None):
@@ -65,21 +73,37 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
 
 if __name__ == '__main__':
 
-    data = pd.read_pickle('pandas/all_data.p')
+    data = pd.read_pickle('a/all_data.p')
+
+    # Shuffle the data such that it is not in order
+    #data = data.sample(frac=1)
+
+    # Remove non-players
+    data = data[data['MINpg'] > 30.]
+    data = data[data['MIN'] > 0.0]
+    data['DK_POINTS_PER_MIN'] = np.where(data['MIN'] == 0.0, 0.0, data['DK_POINTS'] / data['MIN'])
+    data['DK_POINTS_PER_POSS'] = np.where(data['POSS'] == 0.0, 0.0, data['DK_POINTS'] / data['POSS'])
 
     pg_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pg']
     pm_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pm']
     pp_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pp']
 
-    #DKPG_data = data.copy(deep=True)
-    #for cat in pm_cats + pp_cats:
-    #    DKPG_data.pop(cat)
-    #data = DKPG_data
+    DKPG_data = data.copy(deep=True)
+    for cat in pm_cats + pp_cats:
+        DKPG_data.pop(cat)
+    DKPM_data = data.copy(deep=True)
+    for cat in pg_cats + pp_cats:
+        DKPM_data.pop(cat)
+    DKPP_data = data.copy(deep=True)
+    for cat in pg_cats + pm_cats:
+        DKPP_data.pop(cat)
 
-    data['DK_POINTS_PER_MIN'] = data['DK_POINTS'] / data['MIN']
-    data['DK_POINTS_PER_POSS'] = data['DK_POINTS'] / data['POSS']
+    data = DKPG_data
+    #data = DKPM_data
+    #data = DKPP_data
 
-    predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
+    #predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
+    predictions = ["DK_POINTS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
     data_X = data.drop(predictions, axis=1)
     data_Y = data[predictions].copy()
 
@@ -99,25 +123,93 @@ if __name__ == '__main__':
 
     data_X_prepared_np = num_pipeline.fit_transform(data_X)
     data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, data_X.columns)
-    import IPython; IPython.embed()
+    #data_X_prepared = data_X_prepared[['PTSpg', 'FG3Mpg', 'OREBpg', 'DREBpg', 'ASTpg', 'STLpg', 'BLKpg', 'TOpg', 'MINpg', 'POSSpg']]
 
-    print(data_X_prepared)
+    X_train_full, X_test, Y_train_full, Y_test = train_test_split(data_X_prepared, data_Y['DK_POINTS'], train_size=0.85)
+    X_train, X_valid, Y_train, Y_valid = train_test_split(X_train_full, Y_train_full, train_size=0.70/0.85)
 
-    from sklearn.linear_model import LinearRegression
     lin_reg = LinearRegression()
-    lin_reg.fit(data_X_prepared, data_Y['DK_POINTS'])
-    from sklearn.metrics import mean_squared_error
-    predictions = lin_reg.predict(data_X_prepared)
-    error = mean_squared_error(data_Y['DK_POINTS'], predictions)
-    import numpy as np
-    print(np.sqrt(error))
+    lin_reg.fit(X_train_full, Y_train_full)
+    mae = mean_absolute_error(Y_test, lin_reg.predict(X_test))
+    print(mae)
 
-    from sklearn.model_selection import cross_val_score
-    scores = cross_val_score(lin_reg, data_X_prepared, data_Y['DK_POINTS'], scoring="neg_mean_squared_error", cv=10)
-    print(np.mean(np.sqrt(-scores)))
+    """
+    def build_model(x_train, y_train, x_val, y_val, params):
+        input_layer = keras.layers.Input(x_train.shape[1:])
+        latest_input_layer = input_layer
+        neurons = params['n_neurons']
+        for i in range(params['n_hidden']):
+            latest_input_layer = keras.layers.Dense(neurons, activation=params['activation_fn'])(latest_input_layer)
+            neurons = np.ceil(neurons * params['neuron_decay'])
+        if not params['sequential']:
+            latest_input_layer = keras.layers.Concatenate()([input_layer, latest_input_layer])
+        output = keras.layers.Dense(1)(latest_input_layer)
+        model = keras.Model(inputs=[input_layer], outputs=[output])
+        optimizer = keras.optimizers.SGD(lr=params['learning_rate'])
+        model.compile(loss="mean_absolute_error", optimizer=optimizer)
+        early_stopping_cb = keras.callbacks.EarlyStopping(patience=params['patience'], restore_best_weights=True)
+        out = model.fit(
+            x_train,
+            y_train,
+            batch_size=params['batch_size'],
+            epochs=500,
+            validation_data=(x_val, y_val),
+            callbacks=[keras.callbacks.TerminateOnNaN(), early_stopping_cb],
+        )
+        return out, model
+
+    p = {'n_neurons': list(np.arange(10, 200, 10)) + list(np.arange(200, 500, 20)),
+         'n_hidden': [1, 2, 3, 4, 5],
+         'activation_fn': ['relu', 'tanh'],
+         'neuron_decay': [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4],
+         'sequential': [True, False],
+         'learning_rate': [0.0001, 0.001, 0.01, 0.1],
+         'patience': [10],
+         'batch_size': list(np.arange(10, 240, 20)),
+    }
+
+    scan = talos.Scan(
+        x=X_train,
+        y=Y_train,
+        model=build_model,
+        params=p,
+        experiment_name='test',
+        x_val=X_valid,
+        y_val=Y_valid,
+        print_params=True,
+        time_limit='2021-1-29 17:00',
+        fraction_limit=0.05,
+    )
+
+    with open('data.pickle', 'wb') as handle:
+        pickle.dump(scan.data, handle)
+
+    import IPython; IPython.embed()
+    """
+
+    input_ = keras.layers.Input(shape=X_train.shape[1:])
+    hidden1 = keras.layers.Dense(150, activation="relu")(input_)
+    hidden2 = keras.layers.Dense(150, activation="relu")(hidden1)
+    concat = keras.layers.Concatenate()([input_, hidden2])
+    output = keras.layers.Dense(1)(concat)
+    model = keras.Model(inputs=[input_], outputs=[output])
+
+    sgd = keras.optimizers.SGD(learning_rate=0.01)
+    model.compile(loss="mean_absolute_error", optimizer=sgd)
+    early_stopping_cb = keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+    history = model.fit(
+        X_train,
+        Y_train,
+        epochs=200,
+        batch_size=80,
+        validation_data=(X_valid, Y_valid),
+        callbacks=[early_stopping_cb],
+    )
+    model.evaluate(X_test, Y_test)
+
     import IPython; IPython.embed()
 
-
+    """
     permanent_keys = []
     permanent_value = 1000000000
     while True:
@@ -144,4 +236,4 @@ if __name__ == '__main__':
             print("")
         else:
             break
-    
+    """

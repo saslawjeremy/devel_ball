@@ -102,6 +102,8 @@ def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
 
     # Set player advanced stats
     for key, value in player_game.advanced_stats_per_game.to_mongo().iteritems():
+        if key == 'POSS':
+            continue
         game_dict[key] = value
 
     # Set team traditional stats
@@ -176,8 +178,8 @@ def create_raw_dataframe(years, pickle_name):
             # Get opposing team data for this game, if none, skip
             vsTeam_season = TeamSeason.objects(year=player_season.year,
                                                team_id=player_game.opposing_team_id)[0]
-            vsTeam_game = [team_game for team_game in team_season.season_stats
-                           if team_game.game_id == player_game.game_id][0]
+            vsTeam_game = [vsTeam_game for vsTeam_game in vsTeam_season.season_stats
+                           if vsTeam_game.game_id == player_game.game_id][0]
             if not vsTeam_game.traditional_stats_per_game:
                 continue
 
@@ -196,7 +198,6 @@ def create_raw_dataframe(years, pickle_name):
 
             game_dict = get_game_dict(player_game, team_game, vsTeam_game, official_stats)
             data = data.append(game_dict, ignore_index=True)
-        break
 
     data.to_pickle(pickle_name if pickle_name else f'{years}.p')
 

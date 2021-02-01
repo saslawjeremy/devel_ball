@@ -7,6 +7,7 @@ from datetime import timedelta
 from time import sleep
 import numpy as np
 import pandas as pd
+from json import JSONDecodeError
 
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
@@ -253,6 +254,7 @@ def get_games(years):
             game_date = game_date[0]
 
             # For each game on this day
+            invalid_game_ids = []
             for game_id in game_date.games:
 
                 # Fetch Game, if it exists already, skip it
@@ -264,8 +266,18 @@ def get_games(years):
                 game.year = year
 
                 # Fetch Box Score Summary
-                box_score_summary = query_nba_api(
-                    boxscoresummaryv2.BoxScoreSummaryV2, game_id=game_id)
+                try:
+                    box_score_summary = query_nba_api(
+                        boxscoresummaryv2.BoxScoreSummaryV2, game_id=game_id)
+                except JSONDecodeError:
+                    invalid_game_ids.append(game_id)
+                    # The purpose of this except block is because in 2019-20, covid led
+                    # to games being cancelled. Fuck COVID.
+                    if year == '2019-20':
+                        print('Fuck COVID. This game was cancelled.')
+                        continue
+                    else:
+                        raise Exception("Game wasn't found.".format(game_id))
 
                 # Store inactive players
                 game.inactives = [
@@ -411,6 +423,11 @@ def get_games(years):
                 # Save game
                 game.save()
                 print("")
+
+            # Remove game_id of games that were cancelled (covid) from game dates for
+            # future iterations
+            game_date.games = [game_id for game_id in game_date.games if game_id not in invalid_game_ids]
+            game_date.save()
 
 
 if __name__ == '__main__':
