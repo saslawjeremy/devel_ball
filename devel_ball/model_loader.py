@@ -1,7 +1,3 @@
-#!/usr/bin/env python3.7
-
-from argparse import ArgumentParser
-from mongoengine import connect
 import datetime
 from datetime import timedelta
 from time import sleep
@@ -18,7 +14,7 @@ from nba_api.stats.endpoints import (
     boxscoreusagev2,
 )
 
-from models import (
+from .models import (
     Player,
     Team,
     GameDate,
@@ -146,7 +142,6 @@ def get_gamedates(years):
     :param years: the years to load info for
     :type  years: list[str]
     """
-
     # For each specified year, look at the dates and games played on them
     for year in years:
         season_entry = Season()
@@ -189,6 +184,7 @@ def get_gamedates(years):
                 if len(game_ids)>0 and game_ids[0][2] == '3':
                     game_ids = []
                 # If playoff game, stop and mark previous date as last day
+                #if len(game_ids)>0 and game_ids[0][2] == '4' or date=='2021-02-06':
                 if len(game_ids)>0 and game_ids[0][2] == '4':
                     last_date = (
                         datetime.date.fromisoformat(date) - timedelta(1)
@@ -260,6 +256,7 @@ def get_games(years):
                 # Fetch Game, if it exists already, skip it
                 game = Game.objects(game_id=game_id)
                 if game:
+                    print('Game {} already exists'.format(game_id))
                     continue
                 game = Game(game_id=game_id)
                 game.date = date
@@ -273,7 +270,7 @@ def get_games(years):
                     invalid_game_ids.append(game_id)
                     # The purpose of this except block is because in 2019-20, covid led
                     # to games being cancelled. Fuck COVID.
-                    if year == '2019-20':
+                    if year == '2019-20' or year == '2020-21':
                         print('Fuck COVID. This game was cancelled.')
                         continue
                     else:
@@ -428,47 +425,3 @@ def get_games(years):
             # future iterations
             game_date.games = [game_id for game_id in game_date.games if game_id not in invalid_game_ids]
             game_date.save()
-
-
-if __name__ == '__main__':
-
-    parser = ArgumentParser()
-    parser.add_argument('--drop', default=[], nargs='*',
-                        help='Which collections to drop, can specify \'all\', '
-                             '\'all-except-game-dates\', or specific collections.'
-                       )
-    parser.add_argument('--years', default=['2018-19'], nargs='*',
-                        help='Years to acquire player data for. Please use the'
-                             ' format xxxx-xx, e.g. 2019-20.'
-                       )
-    parser.add_argument('--gamedates', action='store_true',
-                        help='Get dates and games played on those dates.'
-                       )
-    parser.add_argument('--games', action='store_true',
-                        help='Get all info and stats for games played on the '
-                             'specified years.  Must have --gamedates already '
-                             'fetched for this year.'
-                       )
-    args = parser.parse_args()
-
-    # Connect to the local mongo client and devel_ball database
-    mongo_client = connect('devel_ball')
-
-    # Drop specified collections if desired
-    drop = []
-    if 'all' in args.drop:
-        drop = mongo_client['devel_ball'].list_collection_names()
-    elif 'all-except-game-dates' in args.drop:
-        drop = mongo_client['devel_ball'].list_collection_names()
-        drop.remove('game-date')
-        drop.remove('season')
-    else:
-        drop = args.drop
-    for collection in drop:
-        mongo_client['devel_ball'].drop_collection(collection)
-
-    # Call the requested data acquiring functions
-    if args.gamedates:
-        get_gamedates(args.years)
-    if args.games:
-        get_games(args.years)

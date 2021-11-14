@@ -1,15 +1,11 @@
-#!/usr/bin/env python3.7
-
 from recordclass import recordclass
-from argparse import ArgumentParser
-from mongoengine import connect
 import datetime
 from datetime import timedelta
 from time import sleep
 import numpy as np
 import pandas as pd
 
-from models import (
+from .models import (
     Player,
     PlayerSeason,
     TeamSeason,
@@ -64,6 +60,8 @@ GAME_VALUES = [
     # Misc
     'HOME',
 ]
+
+RECENT_VALUES = ['MIN', 'POSS', 'USG_PCT', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO']
 
 
 def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
@@ -147,6 +145,11 @@ def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
     # Set home
     game_dict['HOME'] = player_game.home
 
+    # Set recent values, 0 being most recent
+    for recent_stat in RECENT_VALUES:
+        for i, stat in enumerate(player_game.recent_stats['{}_RECENT_FIRST'.format(recent_stat)]):
+            game_dict['RECENT_{}{}'.format(recent_stat, i)] = stat
+
     return game_dict
 
 
@@ -200,17 +203,3 @@ def create_raw_dataframe(years, pickle_name):
             data = data.append(game_dict, ignore_index=True)
 
     data.to_pickle(pickle_name if pickle_name else f'{years}.p')
-
-if __name__ == '__main__':
-
-    parser = ArgumentParser()
-    parser.add_argument('--years', default=['2018-19'], nargs='*',
-                        help='Years to acquire player data for. Please use the'
-                             ' format xxxx-xx, e.g. 2019-20.'
-                       )
-    parser.add_argument('--name', default=None, help='Name for the pickle')
-    args = parser.parse_args()
-
-    # Connect to the local mongo client and devel_ball database
-    mongo_client = connect('devel_ball')
-    create_raw_dataframe(args.years, args.name)

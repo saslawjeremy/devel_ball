@@ -1,12 +1,10 @@
-#!/usr/bin/env python3.7
-
-from argparse import ArgumentParser
-from mongoengine import connect
 import datetime
 from datetime import timedelta
 from collections import namedtuple
+from recordclass import recordclass
+from copy import deepcopy
 
-from models import (
+from .models import (
     Season,
     GameDate,
     Game,
@@ -22,12 +20,11 @@ from models import (
     PlayerSeason,
     PlayerSeasonDate,
     PlayerAdvancedStatsPerGame,
+    PlayerRecentStats,
     PlayerResults,
     GameTraditionalStats
 )
-
-from stat_calculation_utils import *
-from recordclass import recordclass
+from .stat_calculation_utils import *
 
 PlayerTotalSeasonStats = recordclass('PlayerTotalSeasonStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -38,6 +35,11 @@ PlayerTotalSeasonStats = recordclass('PlayerTotalSeasonStats',
         'vsTmFTA', 'vsTmOREB', 'vsTmDREB', 'vsTmAST', 'vsTmSTL', 'vsTmBLK', 'vsTmTO',
         'vsTmPF', 'vsTmPLUS_MINUS', 'vsTmPOSS'],
     defaults=[0.0]*52
+)
+
+PlayerLastGameStats = recordclass('PlayerLastGameStats',
+    ['MIN', 'POSS', 'USG_PCT', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO'],
+    defaults=[0.0]*9
 )
 
 TeamTotalSeasonStats = recordclass('TeamTotalSeasonStats',
@@ -300,7 +302,7 @@ def add_team_season_data(years):
             team_season.save()
 
 
-def load_player_stats(season_date, stats):
+def load_player_stats(season_date, stats, last_game_stats):
     for stat in season_date.per_game_stats:
         season_date.per_game_stats[stat] = getattr(stats, stat)/stats.GAMES
     for stat in season_date.per_minute_stats:
@@ -351,6 +353,12 @@ def load_player_stats(season_date, stats):
     advanced_stats.eFG_PCT = eFG_PCT(stats.FGM, stats.FG3M, stats.FGA)
     advanced_stats.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
 
+    recent_stats = season_date.recent_stats
+    for recent_stat_name in recent_stats:
+        stat_name = recent_stat_name.split('_RECENT_FIRST')[0]
+        recent_stats[recent_stat_name][1:] = recent_stats[recent_stat_name][:-1]
+        recent_stats[recent_stat_name][0] = last_game_stats[stat_name]
+
 
 def update_player_total_stats(total_stats, player_game, team_game, opposing_team_game):
     total_stats.GAMES += 1
@@ -363,6 +371,14 @@ def update_player_total_stats(total_stats, player_game, team_game, opposing_team
     for vsTm_stat in opposing_team_game.traditional_stats:
         total_stats[f'vsTm{vsTm_stat}'] += opposing_team_game.traditional_stats[vsTm_stat]
     total_stats.vsTmPOSS += opposing_team_game.advanced_stats.POSS
+
+
+def update_player_last_game_stats(last_game_stats, player_game):
+    for stat in ['MIN', 'PTS', 'AST', 'STL', 'BLK', 'TO']:
+        last_game_stats[stat] = player_game.traditional_stats[stat]
+    last_game_stats['REB'] = player_game.traditional_stats['OREB'] + player_game.traditional_stats['DREB']
+    for stat in ['POSS', 'USG_PCT']:
+        last_game_stats[stat] = player_game.advanced_stats[stat]
 
 
 def add_player_season_data(years):
@@ -385,6 +401,7 @@ def add_player_season_data(years):
             player_season.year = year
 
             total_stats = PlayerTotalSeasonStats()
+            last_game_stats = PlayerLastGameStats()
 
             # Iterate over each game that player played in this season
             for season_index, game_id in enumerate(player.years[year]):
@@ -396,17 +413,23 @@ def add_player_season_data(years):
                 season_date.season_index = season_index
                 season_date.officials = game.officials
 
-                if season_index > 0:
-                    season_date.per_game_stats = GameTraditionalStats()
-                    season_date.per_minute_stats = GameTraditionalStats()
-                    season_date.per_possession_stats = GameTraditionalStats()
-                    season_date.advanced_stats_per_game = PlayerAdvancedStatsPerGame()
-                    load_player_stats(season_date, total_stats)
-                else:
+                if season_index == 0:
                     season_date.per_game_stats = None
                     season_date.per_minute_stats = None
                     season_date.per_possession_stats = None
                     season_date.advanced_stats_per_game = None
+                    season_date.recent_stats = None
+                else:
+                    season_date.per_game_stats = GameTraditionalStats()
+                    season_date.per_minute_stats = GameTraditionalStats()
+                    season_date.per_possession_stats = GameTraditionalStats()
+                    season_date.advanced_stats_per_game = PlayerAdvancedStatsPerGame()
+                    if season_index == 1:
+                        season_date.recent_stats = PlayerRecentStats()
+                    else:
+                        season_date.recent_stats = deepcopy(previous_recent_stats)
+                    previous_recent_stats = season_date.recent_stats
+                    load_player_stats(season_date, total_stats, last_game_stats)
 
                 # Get the stats of each team in the game
                 player_game = game.player_games[player.id]
@@ -430,41 +453,10 @@ def add_player_season_data(years):
                 opposing_team_game = game.team_games[player_game.opposing_team_id]
                 update_player_total_stats(total_stats, player_game, team_game, opposing_team_game)
 
+                # Update PlayerLastGameStats to reflect this game, for the next iteration's update
+                update_player_last_game_stats(last_game_stats, player_game)
+
             existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
             if len(existing_player_season) > 0:
                 existing_player_season[0].delete()
             player_season.save()
-
-if __name__ == '__main__':
-
-    parser = ArgumentParser()
-    parser.add_argument('--years', default=['2018-19'], nargs='*',
-                        help='Years to post-process player data for. Please use the'
-                             ' format xxxx-xx, e.g. 2019-20.'
-                       )
-    parser.add_argument('--draftkings', action='store_true',
-                        help='Update each game to have draftkings points for each player.'
-                       )
-    parser.add_argument('--player-seasons', action='store_true',
-                        help='Create day by day team statistics for each player in the given years.'
-                       )
-    parser.add_argument('--team-seasons', action='store_true',
-                        help='Create day by day team statistics for each team in the given years.'
-                       )
-    parser.add_argument('--official-seasons', action='store_true',
-                        help='Create day by day team statistics for each official in the given years.'
-                       )
-    args = parser.parse_args()
-
-    # Connect to the local mongo client and devel_ball database
-    mongo_client = connect('devel_ball')
-
-    # Call the requested data acquiring functions
-    if args.draftkings:
-        add_draftkings(args.years)
-    if args.official_seasons:
-        add_official_season_data(args.years)
-    if args.team_seasons:
-        add_team_season_data(args.years)
-    if args.player_seasons:
-        add_player_season_data(args.years)

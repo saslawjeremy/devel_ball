@@ -1,0 +1,45 @@
+#!/usr/bin/env python3.7
+
+from argparse import ArgumentParser
+from mongoengine import connect
+
+from devel_ball.post_process import (
+    add_draftkings,
+    add_official_season_data,
+    add_team_season_data,
+    add_player_season_data,
+)
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser()
+    parser.add_argument('--years', default=['2018-19'], nargs='*',
+                        help='Years to post-process player data for. Please use the'
+                             ' format xxxx-xx, e.g. 2019-20.'
+                       )
+    parser.add_argument('--draftkings', action='store_true',
+                        help='Update each game to have draftkings points for each player.'
+                       )
+    parser.add_argument('--player-seasons', action='store_true',
+                        help='Create day by day team statistics for each player in the given years.'
+                       )
+    parser.add_argument('--team-seasons', action='store_true',
+                        help='Create day by day team statistics for each team in the given years.'
+                       )
+    parser.add_argument('--official-seasons', action='store_true',
+                        help='Create day by day team statistics for each official in the given years.'
+                       )
+    args = parser.parse_args()
+
+    # Connect to the local mongo client and devel_ball database
+    mongo_client = connect('devel_ball')
+
+    # Call the requested data acquiring functions
+    if args.draftkings:
+        add_draftkings(args.years)
+    if args.official_seasons:
+        add_official_season_data(args.years)
+    if args.team_seasons:
+        add_team_season_data(args.years)
+    if args.player_seasons:
+        add_player_season_data(args.years)

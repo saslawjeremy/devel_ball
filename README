@@ -36,5 +36,6 @@ python3 post_process.py --draftkings --years 2018-19
 python3 post_process.py --official-seasons --years 2018-19
 python3 post_process.py --team-seasons --years 2018-19
 python3 post_process.py --player-seasons --years 2018-19
+python3 create_pandas.py --years 2018-19
 
 ####################################################################

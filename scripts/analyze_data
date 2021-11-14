@@ -23,6 +23,9 @@ from sklearn.model_selection import cross_val_score
 from tensorflow import keras
 import talos
 import pickle
+from keras.models import Model, Sequential
+from keras.layers import GRU, Dense, LSTM
+from keras.callbacks import EarlyStopping
 
 class NegativeValueRemover(BaseEstimator, TransformerMixin):
     """
@@ -73,37 +76,74 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
 
 if __name__ == '__main__':
 
-    data = pd.read_pickle('a/all_data.p')
-
+    data = pd.read_pickle('pandas/[\'2018-19\'].p')
     # Shuffle the data such that it is not in order
     #data = data.sample(frac=1)
 
     # Remove non-players
     data = data[data['MINpg'] > 10.]
     data = data[data['MIN'] > 0.0]
+
+    # Set DK points per min and poss fields
     data['DK_POINTS_PER_MIN'] = np.where(data['MIN'] == 0.0, 0.0, data['DK_POINTS'] / data['MIN'])
     data['DK_POINTS_PER_POSS'] = np.where(data['POSS'] == 0.0, 0.0, data['DK_POINTS'] / data['POSS'])
 
     pg_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pg']
     pm_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pm']
     pp_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pp']
+    rec_cats = [cat for cat in list(data.columns) if cat[:6] == 'RECENT']
+    not_rec_cats = [cat for cat in list(data.columns) if cat[:6] != 'RECENT']
+
+    predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
 
     DKPG_data = data.copy(deep=True)
-    for cat in pm_cats + pp_cats:
+    for cat in pm_cats + pp_cats + rec_cats:
         DKPG_data.pop(cat)
     DKPM_data = data.copy(deep=True)
-    for cat in pg_cats + pp_cats:
+    for cat in pg_cats + pp_cats + rec_cats:
         DKPM_data.pop(cat)
     DKPP_data = data.copy(deep=True)
-    for cat in pg_cats + pm_cats:
+    for cat in pg_cats + pm_cats + rec_cats:
         DKPP_data.pop(cat)
+
+
+    REC_data = data.copy(deep=True)
+    for cat in [c for c in not_rec_cats if c not in predictions]:
+        REC_data.pop(cat)
+    for cat in list(REC_data.columns):
+        if 'MIN' not in cat:
+            REC_data.pop(cat)
+    REC_data.pop('DK_POINTS_PER_MIN')
+    # Clean up None's and Nans
+    for i in range(1, 10):
+        REC_data['RECENT_MIN{}'.format(i)] = (
+            np.where(REC_data['RECENT_MIN{}'.format(i)].isnull(),
+                REC_data['RECENT_MIN{}'.format(i-1)],
+                REC_data['RECENT_MIN{}'.format(i)]
+            )
+        )
+    # Create 3D tensor
+    tensor = []
+    for i, row in REC_data.iterrows():
+        d = np.zeros((10, 1))
+        for index in range(10):
+            d[index][0] = row['RECENT_MIN{}'.format(index)]
+        tensor.append(d)
+    X = np.asarray(tensor)
+    Y = REC_data['MIN']
+    # Create model
+    model = Sequential()
+    model.add(LSTM(128, input_shape=((10, 1))))
+    model.add(Dense(1))
+    model.compile(optimizer='RMSprop', loss='mean_absolute_error')
+    earlystop = EarlyStopping(monitor="loss", min_delta=0, patience=5)
+    model.fit(X, Y, batch_size=32, epochs=10, callbacks=[earlystop])
+
 
     data = DKPG_data
     #data = DKPM_data
     #data = DKPP_data
 
-    #predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
-    predictions = ["DK_POINTS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
     data_X = data.drop(predictions, axis=1)
     data_Y = data[predictions].copy()
 
@@ -132,6 +172,12 @@ if __name__ == '__main__':
     lin_reg.fit(X_train_full, Y_train_full)
     mae = mean_absolute_error(Y_test, lin_reg.predict(X_test))
     print(mae)
+
+
+    import IPython; IPython.embed()
+
+    test_data = pd.read_pickle('[\'2020-21\'].p')
+
 
     """
     def build_model(x_train, y_train, x_val, y_val, params):

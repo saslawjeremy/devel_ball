@@ -1,5 +1,3 @@
-#!/usr/bin/env python3.7
-
 from mongoengine import (
     Document,
     EmbeddedDocument,
@@ -254,6 +252,19 @@ class PlayerAdvancedStatsPerGame(EmbeddedDocument):
     TS_PCT = FloatField()
 
 
+class PlayerRecentStats(EmbeddedDocument):
+    """ Player stats for the recent games """
+    MIN_RECENT_FIRST = ListField(default=[None]*10)
+    POSS_RECENT_FIRST = ListField(default=[None]*10)
+    USG_PCT_RECENT_FIRST = ListField(default=[None]*10)
+    PTS_RECENT_FIRST = ListField(default=[None]*10)
+    REB_RECENT_FIRST = ListField(default=[None]*10)
+    AST_RECENT_FIRST = ListField(default=[None]*10)
+    STL_RECENT_FIRST = ListField(default=[None]*10)
+    BLK_RECENT_FIRST = ListField(default=[None]*10)
+    TO_RECENT_FIRST = ListField(default=[None]*10)
+
+
 class PlayerResults(EmbeddedDocument):
     """ Results for this player in this game, that will try to be predicted. """
     DK_POINTS = FloatField()
@@ -280,6 +291,7 @@ class PlayerSeasonDate(EmbeddedDocument):
     per_minute_stats = EmbeddedDocumentField(GameTraditionalStats)
     per_possession_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats_per_game = EmbeddedDocumentField(PlayerAdvancedStatsPerGame)
+    recent_stats = EmbeddedDocumentField(PlayerRecentStats)
     results = EmbeddedDocumentField(PlayerResults)
 
 
