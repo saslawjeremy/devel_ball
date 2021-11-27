@@ -2,28 +2,36 @@
 
 import pandas as pd
 from argparse import ArgumentParser
-from joblib import dump, load
+from joblib import load
 import datetime
+from mongoengine import connect
 
-from devel_ball.analysis import get_model
+from devel_ball.analysis import predict_from_model
 
 
 if __name__ == '__main__':
+
+    connect('devel_ball')
 
     parser = ArgumentParser()
     parser.add_argument(
         "--date",
         default=None,
-        type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
+        #type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
         help='The date to predict for, in format "year-month-day". Default of None means today will be used.',
     )
+    # TODO: the year argument shouldn't be required, I can automatically detect year from date #
     parser.add_argument(
-        '--model', default='~/devel_ball/models/model.p', help='Name for the model to use for prediction'
+        '--year', default='2021-22', help='Year the date is provided to predict for. TODO: deprecate.'
+    )
+    ###############################################################################################
+    parser.add_argument(
+        '--model', default='/Users/Jeremy/devel_ball/models/model.p', help='Name for the model to use for prediction'
     )
     args = parser.parse_args()
 
     # TODO (allow for internal combination of multiple pandas files for each year)
-    data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.years[0]))
+    data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.year))
+    model = load(args.model)
 
-    model = get_model(data)
-    dump(model, args.name)
+    predict_from_model(model, data, args.date)

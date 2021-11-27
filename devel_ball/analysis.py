@@ -26,6 +26,8 @@ from keras.models import Model, Sequential
 from keras.layers import GRU, Dense, LSTM
 from keras.callbacks import EarlyStopping
 
+from devel_ball.models import Player
+
 
 class PredictionType(Enum):
     DKPG = 1 # Draftkings points per game
@@ -336,3 +338,15 @@ def get_model(data):
         else:
             break
     """
+
+def predict_from_model(model, data, date):
+    """
+    TODO: docx
+    """
+    data_X, data_Y, data_accounting = cleanup_data(data)
+    date_data = data_accounting[data_accounting['DATE'] == date]
+    predictions = model.predict(data_X.loc[date_data.index])
+    for i, (_, row) in enumerate(date_data.iterrows()):
+        print(Player.objects(unique_id=row.PLAYER_ID)[0].name)
+        print(predictions[i])
+        print()
