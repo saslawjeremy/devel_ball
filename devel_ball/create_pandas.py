@@ -15,8 +15,12 @@ from .models import (
 
 
 GAME_VALUES = [
+
+    # Basic accounting
+    'PLAYER_ID', 'DATE', 
+
     # Things to predict
-    'DK_POINTS', 'MIN', 'POSS',
+    'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS',
 
     # Player traditional stats per game
     'MINpg', 'POSSpg', 'PTSpg', 'FGMpg', 'FGApg', 'FG3Mpg', 'FG3Apg', 'FTMpg', 'FTApg',
@@ -64,9 +68,13 @@ GAME_VALUES = [
 RECENT_VALUES = ['MIN', 'POSS', 'USG_PCT', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO']
 
 
-def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
+def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats):
 
     game_dict = {value: None for value in GAME_VALUES}
+
+    # Set basic accounting params
+    game_dict['PLAYER_ID'] = player_id
+    game_dict['DATE'] = player_game.date
 
     # Set results of the game
     for key, value in player_game.results.to_mongo().iteritems():
@@ -150,6 +158,14 @@ def get_game_dict(player_game, team_game, vsTeam_game, official_stats):
         for i, stat in enumerate(player_game.recent_stats['{}_RECENT_FIRST'.format(recent_stat)]):
             game_dict['RECENT_{}{}'.format(recent_stat, i)] = stat
 
+    # Update "calculated" result values
+    game_dict["DK_POINTS_PER_MIN"] = game_dict["DK_POINTS"] / game_dict["MIN"] if (
+        game_dict["MIN"] > 0.0
+    ) else 0.0
+    game_dict["DK_POINTS_PER_POSS"] = game_dict["DK_POINTS"] / game_dict["POSS"] if (
+        game_dict["POSS"] > 0.0
+    ) else 0.0
+
     return game_dict
 
 
@@ -199,7 +215,9 @@ def create_raw_dataframe(years, pickle_name):
                 official_stats[stat] = np.mean(
                     [official_game[stat] for official_game in official_games if official_game])
 
-            game_dict = get_game_dict(player_game, team_game, vsTeam_game, official_stats)
+            game_dict = get_game_dict(
+                player_season.player_id, player_game, team_game, vsTeam_game, official_stats
+            )
             data = data.append(game_dict, ignore_index=True)
 
     data.to_pickle(pickle_name if pickle_name else f'{years}.p')

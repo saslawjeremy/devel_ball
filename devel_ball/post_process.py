@@ -145,15 +145,15 @@ def load_official_stats(stats_per_game, stats):
     stats_per_game.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
 
 
-def update_official_total_stats(total_stats, team_games):
+def update_official_total_stats(total_stats, official_games):
     total_stats.GAMES += 1
-    total_stats.MIN += team_games[0].traditional_stats.MIN
-    total_stats.PTS += sum(game.traditional_stats.PTS for game in team_games)
-    total_stats.FGM += sum(game.traditional_stats.FGM for game in team_games)
-    total_stats.FGA += sum(game.traditional_stats.FGA for game in team_games)
-    total_stats.FG3M += sum(game.traditional_stats.FG3M for game in team_games)
-    total_stats.FTA += sum(game.traditional_stats.FTA for game in team_games)
-    total_stats.POSS += sum(game.advanced_stats.POSS for game in team_games)
+    total_stats.MIN += official_games[0].traditional_stats.MIN
+    total_stats.PTS += sum(game.traditional_stats.PTS for game in official_games)
+    total_stats.FGM += sum(game.traditional_stats.FGM for game in official_games)
+    total_stats.FGA += sum(game.traditional_stats.FGA for game in official_games)
+    total_stats.FG3M += sum(game.traditional_stats.FG3M for game in official_games)
+    total_stats.FTA += sum(game.traditional_stats.FTA for game in official_games)
+    total_stats.POSS += sum(game.advanced_stats.POSS for game in official_games)
 
 
 def add_official_season_data(years):

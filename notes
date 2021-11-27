@@ -24,3 +24,26 @@ db.getCollection('game').find({'player_games.203967': {$exists: true}}).sort({'d
 1st define models and calculate team stats over the course of the season
 2nd define models and calculate official stats over the course of the season
 3rd calculate PlayerSeason because those stats will rely on having team/official stats
+
+
+
+- Update PLAYER to have next games
+
+bridges = endpoints.PlayerNextNGames(player_id='1628970')
+
+In [8]: bridges.next_n_games.get_data_frame()
+Out[8]:
+       GAME_ID     GAME_DATE  HOME_TEAM_ID  VISITOR_TEAM_ID  ... VISITOR_TEAM_NICKNAME GAME_TIME HOME_WL VISITOR_WL
+0   0022100281  NOV 26, 2021    1610612766       1610612750  ...          Timberwolves  07:00 PM    12-8        9-9
+1   0022100297  NOV 27, 2021    1610612745       1610612766  ...               Hornets  08:00 PM    2-16       12-8
+2   0022100307  NOV 29, 2021    1610612741       1610612766  ...               Hornets  08:00 PM    12-7       12-8
+3   0022100324  DEC 01, 2021    1610612749       1610612766  ...               Hornets  08:00 PM    11-8       12-8
+4   0022100350  DEC 05, 2021    1610612737       1610612766  ...               Hornets  06:00 PM    10-9       12-8
+..         ...           ...           ...              ...  ...                   ...       ...     ...        ...
+57  0022101161  APR 02, 2022    1610612755       1610612766  ...               Hornets  12:30 PM    10-9       12-8
+58  0022101181  APR 05, 2022    1610612748       1610612766  ...               Hornets  07:30 PM    12-7       12-8
+59  0022101196  APR 07, 2022    1610612766       1610612753  ...                 Magic  07:00 PM    12-8       4-15
+60  0022101208  APR 08, 2022    1610612741       1610612766  ...               Hornets  08:00 PM    12-7       12-8
+61  0022101217  APR 10, 2022    1610612766       1610612764  ...               Wizards      None    12-8       11-7
+
+[62 rows x 13 columns]

@@ -1,0 +1,29 @@
+#!/usr/bin/env python3.7
+
+import pandas as pd
+from argparse import ArgumentParser
+from joblib import dump, load
+import datetime
+
+from devel_ball.analysis import get_model
+
+
+if __name__ == '__main__':
+
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--date",
+        default=None,
+        type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
+        help='The date to predict for, in format "year-month-day". Default of None means today will be used.',
+    )
+    parser.add_argument(
+        '--model', default='~/devel_ball/models/model.p', help='Name for the model to use for prediction'
+    )
+    args = parser.parse_args()
+
+    # TODO (allow for internal combination of multiple pandas files for each year)
+    data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.years[0]))
+
+    model = get_model(data)
+    dump(model, args.name)

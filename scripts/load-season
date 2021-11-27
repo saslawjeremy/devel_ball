@@ -1,0 +1,19 @@
+#/bin/bash
+
+# Get year
+YEAR=$1
+
+# Exit on any error
+set -e
+
+# Exit on SIGINT
+trap "exit" INT
+
+# Execute full year
+load-data --gamedates --years $YEAR
+load-data --games --years $YEAR
+post-process --draftkings --years $YEAR
+post-process --official-seasons --years $YEAR
+post-process --team-seasons --years $YEAR
+post-process --player-seasons --years $YEAR
+create-pandas --years $YEAR --name ~/devel_ball/data/pandas/$YEAR.p

@@ -65,7 +65,7 @@ def add_entry_to_db(document_type, unique_id, name, year, game_id):
     :type  game_id: str
     """
 
-    # Fetch entry if it exists, or create it if it doesn't alrady
+    # Fetch entry if it exists, or create it if it doesn't already
     entry = document_type.objects(unique_id=unique_id)
     if entry:
         entry = entry[0]
@@ -77,8 +77,9 @@ def add_entry_to_db(document_type, unique_id, name, year, game_id):
     if year not in entry.years:
         entry.years[year] = []
 
-    # Append game_id to list of games for year
-    entry.years[year].append(game_id)
+    # Append game_id to list of games for year if game not in list already
+    if game_id not in entry.years[year]:
+        entry.years[year].append(game_id)
 
     # Save updated entry
     entry.save()
@@ -144,30 +145,37 @@ def get_gamedates(years):
     """
     # For each specified year, look at the dates and games played on them
     for year in years:
-        season_entry = Season()
-        season_entry.year = year
 
-        # Get the first day of October as the first possible default date
-        first_date = '{}-10-01'.format(year[:4])
+        season_entry = Season.objects(year=year)
+        if season_entry:
+            print("Season {} is already in the databse.".format(year))
+            season_entry = season_entry[0]
+            first_date = season_entry.first_date
+        else:
 
-        # Iterate until finding first day of regular season
-        while True:
-            print("Looking at {} for first day of season".format(first_date))
-            gameday = query_nba_api(scoreboardv2.ScoreboardV2, game_date=first_date)
-            game_ids = gameday.available.get_data_frame()['GAME_ID']
-            # If there were games this day, and it is regular season
-            if len(game_ids)>0 and game_ids[0][2]=='2':
-                season_entry.first_date = first_date
-                break
-            else:
-                first_date = (
-                    datetime.date.fromisoformat(first_date) +
-                    timedelta(1)).isoformat()
+            season_entry = Season()
+            season_entry.year = year
+
+            # Get the first day of October as the first possible default date
+            first_date = '{}-10-01'.format(year[:4])
+
+            # Iterate until finding first day of regular season
+            while True:
+                print("Looking at {} for first day of season".format(first_date))
+                gameday = query_nba_api(scoreboardv2.ScoreboardV2, game_date=first_date)
+                game_ids = gameday.available.get_data_frame()['GAME_ID']
+                # If there were games this day, and it is regular season
+                if len(game_ids)>0 and game_ids[0][2]=='2':
+                    season_entry.first_date = first_date
+                    break
+                else:
+                    first_date = (
+                        datetime.date.fromisoformat(first_date) +
+                        timedelta(1)).isoformat()
 
         # Begin loading into mongo the game dates
         date = first_date
         while True:
-
             gamedate_entry = GameDate.objects(date=date)
 
             # Game date already exists in database
@@ -183,15 +191,16 @@ def get_gamedates(years):
                 # If all star game, skip
                 if len(game_ids)>0 and game_ids[0][2] == '3':
                     game_ids = []
-                # If playoff game, stop and mark previous date as last day
-                #if len(game_ids)>0 and game_ids[0][2] == '4' or date=='2021-02-06':
-                if len(game_ids)>0 and game_ids[0][2] == '4':
+                # If playoff game, stop and mark previous date as last day, or if date is later than today
+                if (
+                    len(game_ids)>0 and game_ids[0][2] == '4'
+                    or datetime.date.fromisoformat(date) > datetime.date.today()
+                ):
                     last_date = (
                         datetime.date.fromisoformat(date) - timedelta(1)
                         ).isoformat()
                     season_entry.last_date = last_date
-                    if not Season.objects(year=year):
-                        season_entry.save()
+                    season_entry.save()
                     break
 
                 # Create gameday entry for this day
@@ -253,11 +262,13 @@ def get_games(years):
             invalid_game_ids = []
             for game_id in game_date.games:
 
-                # Fetch Game, if it exists already, skip it
+                # Fetch Game, if it exists already and was played, skip it
                 game = Game.objects(game_id=game_id)
                 if game:
-                    print('Game {} already exists'.format(game_id))
-                    continue
+                    team_games = list(game[0].team_games.values())
+                    if team_games[0].traditional_stats.MIN > 0.0 and team_games[0].traditional_stats.MIN > 0.0:
+                        print('Game {} already exists'.format(game_id))
+                        continue
                 game = Game(game_id=game_id)
                 game.date = date
                 game.year = year
@@ -276,6 +287,13 @@ def get_games(years):
                     else:
                         raise Exception("Game wasn't found.".format(game_id))
 
+                # If game is still happening, skip
+                if str.lower(
+                    box_score_summary.game_summary.get_data_frame().GAME_STATUS_TEXT[0]
+                ) != 'final':
+                    print("Game is still happening, skipping for now.\n")
+                    continue
+
                 # Store inactive players
                 game.inactives = [
                     str(inactive_player) for inactive_player in
@@ -285,8 +303,10 @@ def get_games(years):
 
                 # Store officials for this game (create Official if needed)
                 officials_df = clean_boxscore_df(
-                    box_score_summary.officials.get_data_frame(), index='OFFICIAL_ID',
-                    str_keys=['OFFICIAL_ID'])
+                    box_score_summary.officials.get_data_frame(),
+                    index='OFFICIAL_ID',
+                    str_keys=['OFFICIAL_ID'],
+                )
                 officials = []
                 game.officials = officials
                 for official_id, official in officials_df.iterrows():

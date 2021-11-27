@@ -10,5 +10,12 @@ setuptools.setup(
     author_email='',
     packages=['devel_ball'],
     zip_safe=False,
-    scripts=['scripts/load_models', 'scripts/post_process', 'scripts/create_pandas', 'scripts/load_season'],
+    scripts=[
+        'scripts/load-data',
+        'scripts/post-process',
+        'scripts/create-pandas',
+        'scripts/load-season',
+        'scripts/create-model',
+        'scripts/predict-date'
+    ],
 )
