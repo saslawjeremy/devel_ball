@@ -2,7 +2,7 @@
 
 import pandas as pd
 from argparse import ArgumentParser
-from joblib import dump, load
+import pickle
 
 from devel_ball.analysis import get_model
 
@@ -20,5 +20,5 @@ if __name__ == '__main__':
     # TODO (allow for internal combination of multiple pandas files for each year)
     data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.years[0]))
 
-    model = get_model(data)
-    dump(model, args.name)
+    model, data_pipeline = get_model(data)
+    pickle.dump((model, data_pipeline), open(args.name, 'wb'))

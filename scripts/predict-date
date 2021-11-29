@@ -2,9 +2,9 @@
 
 import pandas as pd
 from argparse import ArgumentParser
-from joblib import load
 import datetime
 from mongoengine import connect
+import pickle
 
 from devel_ball.analysis import predict_from_model
 
@@ -26,12 +26,13 @@ if __name__ == '__main__':
     )
     ###############################################################################################
     parser.add_argument(
-        '--model', default='/Users/Jeremy/devel_ball/models/model.p', help='Name for the model to use for prediction'
+        '--model', default='model.p', help='Name for the model to use for prediction'
     )
     args = parser.parse_args()
 
     # TODO (allow for internal combination of multiple pandas files for each year)
     data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.year))
-    model = load(args.model)
+    model_name = '/Users/Jeremy/devel_ball/models/{}'.format(args.model)
+    model, data_pipeline = pickle.load(open(model_name, 'rb'))
 
-    predict_from_model(model, data, args.date)
+    predict_from_model(model, data_pipeline, data, args.date)

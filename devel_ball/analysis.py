@@ -110,7 +110,7 @@ def get_cleanup_pipeline(data):
     return full_pipeline
 
 
-def cleanup_data(data, prediction_type=PredictionType.DKPG):
+def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG):
     """
     TODO: docx
     """
@@ -166,14 +166,17 @@ def cleanup_data(data, prediction_type=PredictionType.DKPG):
     data_X = data_X.drop(accounting_cats, axis=1)
 
     # Get the pipeline and clean the data
-    full_pipeline = get_cleanup_pipeline(data_X)
-    data_X_prepared_np = full_pipeline.fit_transform(data_X)
+    if data_pipeline is None:
+        data_pipeline = get_cleanup_pipeline(data_X)
+        data_X_prepared_np = data_pipeline.fit_transform(data_X)
+    else:
+        data_X_prepared_np = data_pipeline.transform(data_X)
     data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, data_X.columns)
     #data_X_prepared = data_X_prepared[
     #    ['PTSpg', 'FG3Mpg', 'OREBpg', 'DREBpg', 'ASTpg', 'STLpg', 'BLKpg', 'TOpg', 'MINpg', 'POSSpg']
     #]
 
-    return data_X_prepared, data_Y, data_accounting
+    return data_X_prepared, data_Y, data_accounting, data_pipeline
 
 
     ### TEMP - LEFTOVER NOTES FROM TESTING RECENCY DATA ON MINS IT SEEMS ###
@@ -218,7 +221,7 @@ def get_model(data):
     Currently just a copy and paste of various analysis/model-creation snippets
     """
 
-    data_X, data_Y, data_accounting = cleanup_data(data, PredictionType.DKPG)
+    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(data, prediction_type=PredictionType.DKPG)
 
     # Create model
     X_train_full, X_test, Y_train_full, Y_test = train_test_split(data_X, data_Y, train_size=0.85)
@@ -229,7 +232,7 @@ def get_model(data):
     mae = mean_absolute_error(Y_test, lin_reg.predict(X_test))
     print(mae)
 
-    return lin_reg
+    return lin_reg, data_pipeline
 
 
 
@@ -339,12 +342,15 @@ def get_model(data):
             break
     """
 
-def predict_from_model(model, data, date):
+def predict_from_model(model, data_pipeline, data, date):
     """
     TODO: docx
     """
-    data_X, data_Y, data_accounting = cleanup_data(data)
+
+    data_X, data_Y, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline)
     date_data = data_accounting[data_accounting['DATE'] == date]
+    if len(date_data) == 0:
+        return
     predictions = model.predict(data_X.loc[date_data.index])
     for i, (_, row) in enumerate(date_data.iterrows()):
         print(Player.objects(unique_id=row.PLAYER_ID)[0].name)
