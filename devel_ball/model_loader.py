@@ -191,10 +191,10 @@ def get_gamedates(years):
                 # If all star game, skip
                 if len(game_ids)>0 and game_ids[0][2] == '3':
                     game_ids = []
-                # If playoff game, stop and mark previous date as last day, or if date is later than today
+                # If playoff game, stop and mark previous date as last day, or if date is later than tomorrow
                 if (
                     len(game_ids)>0 and game_ids[0][2] == '4'
-                    or datetime.date.fromisoformat(date) > datetime.date.today()
+                    or datetime.date.fromisoformat(date) > (datetime.date.today() + datetime.timedelta(days=1))
                 ):
                     last_date = (
                         datetime.date.fromisoformat(date) - timedelta(1)

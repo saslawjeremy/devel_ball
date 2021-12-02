@@ -3,11 +3,23 @@
 from argparse import ArgumentParser
 from mongoengine import connect
 
-from devel_ball.create_pandas import create_raw_dataframe
+from devel_ball.create_pandas import (
+    create_training_dataframe,
+    create_predicting_dataframe,
+)
+
 
 if __name__ == '__main__':
 
     parser = ArgumentParser()
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        '--train', action='store_true', help='Create pandas dataframe for training a model on the season'
+    )
+    # TODO: handle X upcoming days, whereas now i'll just do 1 day
+    group.add_argument(
+        '--predict', action='store_true', help='Create pandas dataframe for predicting in the upcoming days',
+    )
     parser.add_argument('--years', default=['2018-19'], nargs='*',
                         help='Years to acquire player data for. Please use the'
                              ' format xxxx-xx, e.g. 2019-20.'
@@ -17,4 +29,7 @@ if __name__ == '__main__':
 
     # Connect to the local mongo client and devel_ball database
     mongo_client = connect('devel_ball')
-    create_raw_dataframe(args.years, args.name)
+    if args.train:
+        create_training_dataframe(args.years, args.name)
+    elif args.predict:
+        create_predicting_dataframe(args.years, args.name)

@@ -14,15 +14,13 @@ from .models import (
     OfficialSeason,
     Team,
     TeamSeason,
+    TeamStats,
     TeamSeasonDate,
-    TeamAdvancedStatsPerGame,
     Player,
     PlayerSeason,
     PlayerSeasonDate,
-    PlayerAdvancedStatsPerGame,
-    PlayerRecentStats,
+    PlayerStats,
     PlayerResults,
-    GameTraditionalStats
 )
 from .stat_calculation_utils import *
 
@@ -202,6 +200,9 @@ def add_official_season_data(years):
                 # Update total season stats for future calculations
                 update_official_total_stats(total_stats, team_games)
 
+            # Update the current stats at this latest point in the season
+            load_official_stats(official_season.current_stats, total_stats)
+
             existing_official_season = OfficialSeason.objects(official_id=official.id, year=year)
             if len(existing_official_season) > 0:
                 existing_official_season[0].delete()
@@ -272,16 +273,15 @@ def add_team_season_data(years):
                 season_date.officials = game.officials
 
                 if season_index > 0:
-                    season_date.traditional_stats_per_game = GameTraditionalStats()
-                    for stat in season_date.traditional_stats_per_game:
-                        season_date.traditional_stats_per_game[stat] = (
-                            getattr(total_stats, stat)/total_stats.GAMES)
+                    season_date.stats = TeamStats()
+                    for stat in season_date.stats.per_game:
+                        season_date.stats.per_game[stat] = (
+                            getattr(total_stats, stat)/total_stats.GAMES
+                        )
 
-                    season_date.advanced_stats_per_game = TeamAdvancedStatsPerGame()
-                    load_team_advanced_stats(season_date.advanced_stats_per_game, total_stats)
+                    load_team_advanced_stats(season_date.stats.advanced, total_stats)
                 else:
-                    season_date.traditional_stats_per_game = None
-                    season_date.advanced_stats_per_game = None
+                    season_date.stats = None
 
                 # Get the stats of each team in the game
                 team_game = game.team_games[team.id]
@@ -296,27 +296,34 @@ def add_team_season_data(years):
                 # Update total season stats for future calculations
                 update_team_total_stats(total_stats, team_game, vs_team_game)
 
+            # Update the current stats at this latest point in the season
+            for stat in team_season.current_stats.per_game:
+                team_season.current_stats.per_game[stat] = (
+                    getattr(total_stats, stat)/total_stats.GAMES
+                )
+            load_team_advanced_stats(team_season.current_stats.advanced, total_stats)
+
             existing_team_season = TeamSeason.objects(team_id=team.id, year=year)
             if len(existing_team_season) > 0:
                 existing_team_season[0].delete()
             team_season.save()
 
 
-def load_player_stats(season_date, stats, last_game_stats):
-    for stat in season_date.per_game_stats:
-        season_date.per_game_stats[stat] = getattr(stats, stat)/stats.GAMES
-    for stat in season_date.per_minute_stats:
+def load_player_stats(stats_to_update, stats, last_game_stats):
+    for stat in stats_to_update.per_game:
+        stats_to_update.per_game[stat] = getattr(stats, stat)/stats.GAMES
+    for stat in stats_to_update.per_minute:
         if stat != 'MIN':
             if stats.MIN > 0.0:
-                season_date.per_minute_stats[stat] = getattr(stats, stat)/stats.MIN
+                stats_to_update.per_minute[stat] = getattr(stats, stat)/stats.MIN
             else:
-                season_date.per_minute_stats[stat] = 0.0
-    for stat in season_date.per_possession_stats:
+                stats_to_update.per_minute[stat] = 0.0
+    for stat in stats_to_update.per_possession:
         if stats.POSS > 0.0:
-            season_date.per_possession_stats[stat] = getattr(stats, stat)/stats.POSS
+            stats_to_update.per_possession[stat] = getattr(stats, stat)/stats.POSS
         else:
-            season_date.per_possession_stats[stat] = 0.0
-    advanced_stats = season_date.advanced_stats_per_game
+            stats_to_update.per_possession[stat] = 0.0
+    advanced_stats = stats_to_update.advanced
     advanced_stats.POSS = stats.POSS/stats.GAMES
     advanced_stats.AST_PCT = AST_PCT(stats.AST, stats.MIN, stats.FGM, stats.TmMIN, stats.TmFGM)
     advanced_stats.PER = PER(stats.FGM, stats.FGA, stats.STL, stats.FG3M, stats.FTM, stats.FTA,
@@ -353,7 +360,7 @@ def load_player_stats(season_date, stats, last_game_stats):
     advanced_stats.eFG_PCT = eFG_PCT(stats.FGM, stats.FG3M, stats.FGA)
     advanced_stats.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
 
-    recent_stats = season_date.recent_stats
+    recent_stats = stats_to_update.recent
     for recent_stat_name in recent_stats:
         stat_name = recent_stat_name.split('_RECENT_FIRST')[0]
         recent_stats[recent_stat_name][1:] = recent_stats[recent_stat_name][:-1]
@@ -414,22 +421,13 @@ def add_player_season_data(years):
                 season_date.officials = game.officials
 
                 if season_index == 0:
-                    season_date.per_game_stats = None
-                    season_date.per_minute_stats = None
-                    season_date.per_possession_stats = None
-                    season_date.advanced_stats_per_game = None
-                    season_date.recent_stats = None
+                    season_date.stats = None
                 else:
-                    season_date.per_game_stats = GameTraditionalStats()
-                    season_date.per_minute_stats = GameTraditionalStats()
-                    season_date.per_possession_stats = GameTraditionalStats()
-                    season_date.advanced_stats_per_game = PlayerAdvancedStatsPerGame()
-                    if season_index == 1:
-                        season_date.recent_stats = PlayerRecentStats()
-                    else:
-                        season_date.recent_stats = deepcopy(previous_recent_stats)
-                    previous_recent_stats = season_date.recent_stats
-                    load_player_stats(season_date, total_stats, last_game_stats)
+                    season_date.stats = PlayerStats()
+                    if season_index != 1:
+                        season_date.stats.recent = deepcopy(previous_recent_stats)
+                    previous_recent_stats = season_date.stats.recent
+                    load_player_stats(season_date.stats, total_stats, last_game_stats)
 
                 # Get the stats of each team in the game
                 player_game = game.player_games[player.id]
@@ -455,6 +453,9 @@ def add_player_season_data(years):
 
                 # Update PlayerLastGameStats to reflect this game, for the next iteration's update
                 update_player_last_game_stats(last_game_stats, player_game)
+
+            # Update the current stats at this latest point in the season
+            load_player_stats(player_season.current_stats, total_stats, last_game_stats)
 
             existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
             if len(existing_player_season) > 0:

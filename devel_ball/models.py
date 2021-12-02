@@ -190,6 +190,7 @@ class OfficialSeason(Document):
     official_id = StringField()
     year = StringField()
     season_stats = ListField(EmbeddedDocumentField(OfficialSeasonDate), default=[])
+    current_stats = EmbeddedDocumentField(OfficialStatsPerGame, default=OfficialStatsPerGame())
 
 
 class TeamAdvancedStatsPerGame(EmbeddedDocument):
@@ -207,6 +208,12 @@ class TeamAdvancedStatsPerGame(EmbeddedDocument):
     TS_PCT = FloatField()
 
 
+class TeamStats(EmbeddedDocument):
+    """ Various stats pertaining to a player """
+    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
+    advanced = EmbeddedDocumentField(TeamAdvancedStatsPerGame, default=TeamAdvancedStatsPerGame())
+
+
 class TeamSeasonDate(EmbeddedDocument):
     """ A given day over the course of a season for a specific team.
         Includes:
@@ -220,8 +227,7 @@ class TeamSeasonDate(EmbeddedDocument):
     home = BooleanField()
     opposing_team_id = StringField()
     officials = ListField(StringField())
-    traditional_stats_per_game = EmbeddedDocumentField(GameTraditionalStats)
-    advanced_stats_per_game = EmbeddedDocumentField(TeamAdvancedStatsPerGame)
+    stats = EmbeddedDocumentField(TeamStats)
 
 
 class TeamSeason(Document):
@@ -230,6 +236,7 @@ class TeamSeason(Document):
     team_id = StringField()
     year = StringField()
     season_stats = ListField(EmbeddedDocumentField(TeamSeasonDate), default=[])
+    current_stats = EmbeddedDocumentField(TeamStats, default=TeamStats())
 
 
 class PlayerAdvancedStatsPerGame(EmbeddedDocument):
@@ -272,6 +279,15 @@ class PlayerResults(EmbeddedDocument):
     POSS = FloatField()
 
 
+class PlayerStats(EmbeddedDocument):
+    """ Various stats pertaining to a player """
+    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
+    per_minute = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
+    per_possession = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
+    advanced = EmbeddedDocumentField(PlayerAdvancedStatsPerGame, default=PlayerAdvancedStatsPerGame())
+    recent = EmbeddedDocumentField(PlayerRecentStats, default=PlayerRecentStats())
+
+
 class PlayerSeasonDate(EmbeddedDocument):
     """ A given day over the course of a season for a specific player.
         Includes:
@@ -287,11 +303,7 @@ class PlayerSeasonDate(EmbeddedDocument):
     team_id = StringField()
     opposing_team_id = StringField()
     officials = ListField(StringField())
-    per_game_stats = EmbeddedDocumentField(GameTraditionalStats)
-    per_minute_stats = EmbeddedDocumentField(GameTraditionalStats)
-    per_possession_stats = EmbeddedDocumentField(GameTraditionalStats)
-    advanced_stats_per_game = EmbeddedDocumentField(PlayerAdvancedStatsPerGame)
-    recent_stats = EmbeddedDocumentField(PlayerRecentStats)
+    stats = EmbeddedDocumentField(PlayerStats)
     results = EmbeddedDocumentField(PlayerResults)
 
 
@@ -301,3 +313,4 @@ class PlayerSeason(Document):
     player_id = StringField()
     year = StringField()
     season_stats = ListField(EmbeddedDocumentField(PlayerSeasonDate), default=[])
+    current_stats = EmbeddedDocumentField(PlayerStats, default=PlayerStats())

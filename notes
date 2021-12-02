@@ -47,3 +47,31 @@ Out[8]:
 61  0022101217  APR 10, 2022    1610612766       1610612764  ...               Wizards      None    12-8       11-7
 
 [62 rows x 13 columns]
+
+
+
+from draft_kings import client, Sport
+
+In [17]: for group in client.contests(sport=Sport.NBA)['groups']:
+    ...:     print(group['id'])
+    ...:     print(group['starts_at'].astimezone())
+    ...:     print(group['games_count'])
+    ...:     print()
+
+idd = 60017
+
+In [14]: for p in client.available_players(idd)['players']:
+    ...:     print(p['id'])
+    ...:     print(p['first_name'])
+    ...:     print(p['last_name'])
+    ...:     print(p['draft']['salary'])
+    ...:     print()
+
+
+Create 2 versions of pandas every day:
+1) the current one which updates with past data up to this day, used for training
+2) one for the next (X?) days using all players available in the season, and playerxnextgames
+
+--- update player-season, team-season, official-season to also have a "current stats" which reflects the last stats in the season_stats, plus the updates from the game just played
+
+- TODO !! - change the recent stats to check for recent games played not just last 10 times they were in a game

@@ -169,7 +169,7 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
     return game_dict
 
 
-def create_raw_dataframe(years, pickle_name):
+def create_training_dataframe(years, pickle_name):
 
     data = pd.DataFrame(columns=GAME_VALUES)
 
@@ -221,3 +221,7 @@ def create_raw_dataframe(years, pickle_name):
             data = data.append(game_dict, ignore_index=True)
 
     data.to_pickle(pickle_name if pickle_name else f'{years}.p')
+
+
+def create_predicting_dataframe(years, pickle_name):
+    print("pre")
