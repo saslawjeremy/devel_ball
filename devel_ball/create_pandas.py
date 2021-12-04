@@ -81,18 +81,18 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
         game_dict[key] = value
 
     # Set player traditional stats per game
-    for key, value in player_game.per_game_stats.to_mongo().iteritems():
+    for key, value in player_game.stats.per_game.to_mongo().iteritems():
         game_dict[f'{key}pg'] = value
     game_dict['REBpg'] = game_dict['OREBpg'] + game_dict['DREBpg']
-    game_dict['POSSpg'] = player_game.advanced_stats_per_game.to_mongo()['POSS']
+    game_dict['POSSpg'] = player_game.stats.advanced.to_mongo()['POSS']
 
     # Set player traditional stats per minute
-    for key, value in player_game.per_minute_stats.to_mongo().iteritems():
+    for key, value in player_game.stats.per_minute.to_mongo().iteritems():
         game_dict[f'{key}pm'] = value
     game_dict['REBpm'] = game_dict['OREBpm'] + game_dict['DREBpm']
 
     # Set player traditional stats per possession
-    for key, value in player_game.per_possession_stats.to_mongo().iteritems():
+    for key, value in player_game.stats.per_possession.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}pp'] = value
@@ -107,13 +107,13 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
                         if game_dict['FTApg'] > 0.0 else 0.0)
 
     # Set player advanced stats
-    for key, value in player_game.advanced_stats_per_game.to_mongo().iteritems():
+    for key, value in player_game.stats.advanced.to_mongo().iteritems():
         if key == 'POSS':
             continue
         game_dict[key] = value
 
     # Set team traditional stats
-    for key, value in team_game.traditional_stats_per_game.to_mongo().iteritems():
+    for key, value in team_game.stats.per_game.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}tm'] = value
@@ -126,11 +126,11 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
                           if game_dict['FTAtm'] > 0.0 else 0.0)
 
     # Set team advanced stats
-    for key, value in team_game.advanced_stats_per_game.to_mongo().iteritems():
+    for key, value in team_game.stats.advanced.to_mongo().iteritems():
         game_dict[f'{key}tm'] = value
 
     # Set opposing team traditional stats
-    for key, value in vsTeam_game.traditional_stats_per_game.to_mongo().iteritems():
+    for key, value in vsTeam_game.stats.per_game.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}vsTm'] = value
@@ -143,7 +143,7 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
                             if game_dict['FTAvsTm'] > 0.0 else 0.0)
 
     # Set opposing team advanced stats
-    for key, value in vsTeam_game.advanced_stats_per_game.to_mongo().iteritems():
+    for key, value in vsTeam_game.stats.advanced.to_mongo().iteritems():
         game_dict[f'{key}vsTm'] = value
 
     # Set official stats
@@ -155,7 +155,7 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
 
     # Set recent values, 0 being most recent
     for recent_stat in RECENT_VALUES:
-        for i, stat in enumerate(player_game.recent_stats['{}_RECENT_FIRST'.format(recent_stat)]):
+        for i, stat in enumerate(player_game.stats.recent['{}_RECENT_FIRST'.format(recent_stat)]):
             game_dict['RECENT_{}{}'.format(recent_stat, i)] = stat
 
     # Update "calculated" result values
@@ -183,7 +183,7 @@ def create_training_dataframe(years, pickle_name):
         for player_game in season_stats:
 
             # If no player data for this game, skip
-            if not player_game.per_game_stats or player_game.per_game_stats.MIN <= 0.0:
+            if not player_game.stats or player_game.stats.per_game.MIN <= 0.0:
                 continue
 
             # Get team data for this game, if none, skip
@@ -191,7 +191,7 @@ def create_training_dataframe(years, pickle_name):
                                              team_id=player_game.team_id)[0]
             team_game = [team_game for team_game in team_season.season_stats
                          if team_game.game_id == player_game.game_id][0]
-            if not team_game.traditional_stats_per_game:
+            if not team_game.stats:
                 continue
 
             # Get opposing team data for this game, if none, skip
@@ -199,7 +199,7 @@ def create_training_dataframe(years, pickle_name):
                                                team_id=player_game.opposing_team_id)[0]
             vsTeam_game = [vsTeam_game for vsTeam_game in vsTeam_season.season_stats
                            if vsTeam_game.game_id == player_game.game_id][0]
-            if not vsTeam_game.traditional_stats_per_game:
+            if not vsTeam_game.stats:
                 continue
 
             # Get official data for this game, if none, skip
