@@ -4,17 +4,23 @@ from datetime import timedelta
 from time import sleep
 import numpy as np
 import pandas as pd
+import attr
 
 from draft_kings import client, Sport
+
+from nba_api.stats.endpoints import CommonPlayerInfo
 
 from .models import (
     Player,
     DraftKingsPlayer,
+    Team,
+    DraftKingsTeam,
     PlayerSeason,
     TeamSeason,
     OfficialSeason,
     OfficialStatsPerGame,
 )
+from .model_loader import query_nba_api
 
 
 GAME_VALUES = [
@@ -62,16 +68,27 @@ GAME_VALUES = [
     'DREB_PCTvsTm', 'AST_TOVvsTm', 'TO_PCTvsTm', 'eFG_PCTvsTm', 'TS_PCTvsTm',
 
     # Official stats per game
-    'PTSoff', 'FGAoff', 'FTAoff', 'POSSoff', 'PACEoff', 'eFG_PCToff', 'TS_PCToff',
+    #'PTSoff', 'FGAoff', 'FTAoff', 'POSSoff', 'PACEoff', 'eFG_PCToff', 'TS_PCToff',
 
     # Misc
     'HOME',
 ]
 
+
 RECENT_VALUES = ['MIN', 'POSS', 'USG_PCT', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO']
 
 
-def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats):
+@attr.s
+class DK_PLAYER(object):
+    dk_player_entry = attr.ib()
+    player_entry = attr.ib()
+    team_entry = attr.ib()
+    vs_team_entry = attr.ib()
+    home = attr.ib()
+    cost = attr.ib()
+
+
+def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_stats):
 
     game_dict = {value: None for value in GAME_VALUES}
 
@@ -150,8 +167,8 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game, official_stats
         game_dict[f'{key}vsTm'] = value
 
     # Set official stats
-    for key, value in official_stats.to_mongo().iteritems():
-        game_dict[f'{key}off'] = value
+    #for key, value in official_stats.to_mongo().iteritems():
+    #    game_dict[f'{key}off'] = value
 
     # Set home
     game_dict['HOME'] = player_game.home
@@ -206,20 +223,20 @@ def create_training_dataframe(years, pickle_name):
                 continue
 
             # Get official data for this game, if none, skip
-            officials_season = OfficialSeason.objects(
-                year=player_season.year, official_id__in=player_game.officials)
-            official_games = [official_game.stats_per_game for official_season in officials_season
-                              for official_game in official_season.season_stats
-                              if official_game.game_id == player_game.game_id]
-            if all(official_game is None for official_game in official_games):
-                continue
-            official_stats = OfficialStatsPerGame()
-            for stat in official_stats:
-                official_stats[stat] = np.mean(
-                    [official_game[stat] for official_game in official_games if official_game])
+            #officials_season = OfficialSeason.objects(
+            #    year=player_season.year, official_id__in=player_game.officials)
+            #official_games = [official_game.stats_per_game for official_season in officials_season
+            #                  for official_game in official_season.season_stats
+            #                  if official_game.game_id == player_game.game_id]
+            #if all(official_game is None for official_game in official_games):
+            #    continue
+            #official_stats = OfficialStatsPerGame()
+            #for stat in official_stats:
+            #    official_stats[stat] = np.mean(
+            #        [official_game[stat] for official_game in official_games if official_game])
 
             game_dict = get_game_dict(
-                player_season.player_id, player_game, team_game, vsTeam_game, official_stats
+                player_season.player_id, player_game, team_game, vsTeam_game, #official_stats
             )
             data = data.append(game_dict, ignore_index=True)
 
@@ -318,9 +335,53 @@ def get_draftkings_players_for_date(date, year):
                 )
                 dk_player_entry.save()
 
-        player_map[dk_player_entry] = dk_player["draft"]["salary"]
+        # If player is relevant, make sure his team is in db
+        if dk_player_entry.player is not None and not DraftKingsTeam.objects(
+            dk_team_id=str(dk_player['team_id'])
+        ).limit(1).first():
+            common_player_info = query_nba_api(CommonPlayerInfo, player_id=dk_player_entry.player.unique_id)
+            team_id = common_player_info.common_player_info.get_data_frame().TEAM_ID[0]
+            team = Team.objects(unique_id=str(team_id)).limit(1).first()
+            dk_team_entry = DraftKingsTeam(
+                dk_team_id=str(dk_player['team_id']),
+                team=team,
+            )
+            dk_team_entry.save()
 
-    return player_map
+        # Update player map for this player
+        player_map[dk_player_entry] = dk_player
+
+    # Create final map to return
+    final_players = []
+    for dk_player_entry, dk_player in player_map.items():
+
+        # If player is irrelevant, skip
+        if dk_player_entry.player is None:
+            continue
+
+        # Get teams
+        dk_team_id = str(dk_player['team_id'])
+        home = dk_player['match_up']['home_team_id'] == dk_player['team_id']
+        dk_vs_team_id = str(
+            dk_player['match_up']['away_team_id'] if home else dk_player['match_up']['home_team_id']
+        )
+        dk_team = DraftKingsTeam.objects(dk_team_id=dk_team_id).limit(1).first()
+        dk_vs_team = DraftKingsTeam.objects(dk_team_id=dk_vs_team_id).limit(1).first()
+
+        # Update final map
+        final_players.append(
+            DK_PLAYER(
+                dk_player_entry=dk_player_entry,
+                player_entry=dk_player_entry.player,
+                team_entry=dk_team,
+                vs_team_entry=dk_vs_team,
+                home=home,
+                cost=dk_player["draft"]["salary"],
+            )
+        )
+
+    return final_players
+
 
 def create_predicting_dataframe(years, pickle_name, today=False):
 
@@ -328,9 +389,5 @@ def create_predicting_dataframe(years, pickle_name, today=False):
     date = datetime.datetime.today().date() if today else datetime.datetime.today().date() + timedelta(days=1)
     dk_players = get_draftkings_players_for_date(date, years[0])
 
-
-
-    ### DEBUG ###
-    for dk_player, cost in dk_players.items():
-        print(dk_player.dk_name, dk_player.player.name if dk_player.player is not None else "NONE", cost)
-    ###
+    for dk_player in dk_players:
+        pass

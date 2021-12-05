@@ -33,6 +33,11 @@ class Team(Document):
                                     # list of games in that season
 
 
+class DraftKingsTeam(Document):
+    dk_team_id = StringField(primary_key=True)
+    team = ReferenceField(Team)
+
+
 class Official(Document):
     """ Official representation. """
     unique_id = StringField(primary_key=True)
