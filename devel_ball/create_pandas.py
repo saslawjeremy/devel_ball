@@ -5,8 +5,11 @@ from time import sleep
 import numpy as np
 import pandas as pd
 
+from draft_kings import client, Sport
+
 from .models import (
     Player,
+    DraftKingsPlayer,
     PlayerSeason,
     TeamSeason,
     OfficialSeason,
@@ -17,7 +20,7 @@ from .models import (
 GAME_VALUES = [
 
     # Basic accounting
-    'PLAYER_ID', 'DATE', 
+    'PLAYER_ID', 'DATE',
 
     # Things to predict
     'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS',
@@ -223,5 +226,111 @@ def create_training_dataframe(years, pickle_name):
     data.to_pickle(pickle_name if pickle_name else f'{years}.p')
 
 
-def create_predicting_dataframe(years, pickle_name):
-    print("pre")
+def get_player_from_name(first_name, last_name, year):
+    """
+    Helpful function to find the right player in the database built from nba_api from
+    a string name from the draft_kings api
+    """
+
+    name = "{} {}".format(first_name, last_name)
+
+    # Start with case insensitive exact search
+    player = Player.objects(name__iexact=name, years__exists=year)
+    if player and player.count() == 1:
+        return player.first()
+
+    # Next check if full name is contained inside of db name (case insensitive)
+    player = Player.objects(name__icontains=name, years__exists=year)
+    if player and player.count() == 1:
+        return player.first()
+
+    # Next check if any part of the name is found inside just 1 player in db
+    for part_name in [first_name, last_name]:
+        player = Player.objects(name__icontains=part_name, years__exists=year)
+        if player and player.count() == 1:
+            return player.first()
+
+    # Next check for each length of letters for last name and first name, if both are contained
+    for i in range(len(first_name)):
+        players = Player.objects(name__icontains=first_name[:i+1], years__exists=year)
+        for i in range(len(last_name)):
+            quantity = 0
+            found_player = None
+            for player in players:
+                if last_name[:i+1] in player.name:
+                    quantity += 1
+                    found_player = player
+            if quantity == 1:
+                return found_player
+
+    raise Exception("PLAYER NOT FOUND: {}".format(name))
+
+
+def get_draftkings_players_for_date(date, year):
+
+    # Find the contest with the players of relevance for date, by searching
+    # for the player group with the most games within it for that given day
+    games_count = 0
+    dk_group_id = None
+    for group in client.contests(sport=Sport.NBA)['groups']:
+
+        # Skip groups from the wrong data
+        group_date = group['starts_at'].astimezone().date()
+        if group_date != date:
+            continue
+
+        # Find the group with the most games to play in this day
+        if group["games_count"] > games_count:
+            dk_group_id = group["id"]
+            games_count = group["games_count"]
+
+    if dk_group_id is None:
+        print("No group found")
+        return
+
+    # Find the players for this group
+    player_map = {}
+    for dk_player in client.available_players(dk_group_id)['players']:
+
+        full_name = "{} {}".format(dk_player["first_name"], dk_player["last_name"])
+        dk_player_entry = DraftKingsPlayer.objects(dk_name=full_name).limit(1).first()
+        # If this player has not been found before / stored as a dk_player
+        if not dk_player_entry:
+            player = get_player_from_name(dk_player["first_name"], dk_player["last_name"], year=year)
+            dk_player_entry = DraftKingsPlayer(
+                dk_name=full_name,
+                player=player,
+            )
+            dk_player_entry.save()
+        # Else if this player has been deemed irrelevant in the past, search again, but if fail to find
+        # gracefully move on
+        elif dk_player_entry.player is None:
+            try:
+                player = get_player_from_name(dk_player["first_name"], dk_player["last_name"], year=year)
+                print("Found previously ignored player, updating: {}".format(full_name))
+            except:
+                pass
+            else:
+                dk_player_entry.delete()
+                dk_player_entry = DraftKingsPlayer(
+                    dk_name=full_name,
+                    player=player,
+                )
+                dk_player_entry.save()
+
+        player_map[dk_player_entry] = dk_player["draft"]["salary"]
+
+    return player_map
+
+def create_predicting_dataframe(years, pickle_name, today=False):
+
+    # Get map of players to cost for given date
+    date = datetime.datetime.today().date() if today else datetime.datetime.today().date() + timedelta(days=1)
+    dk_players = get_draftkings_players_for_date(date, years[0])
+
+
+
+    ### DEBUG ###
+    for dk_player, cost in dk_players.items():
+        print(dk_player.dk_name, dk_player.player.name if dk_player.player is not None else "NONE", cost)
+    ###

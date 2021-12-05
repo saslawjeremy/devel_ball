@@ -17,7 +17,6 @@ if __name__ == '__main__':
     parser.add_argument(
         "--date",
         default=None,
-        #type=lambda s: datetime.datetime.strptime(s, "%Y-%m-%d"),
         help='The date to predict for, in format "year-month-day". Default of None means today will be used.',
     )
     # TODO: the year argument shouldn't be required, I can automatically detect year from date #

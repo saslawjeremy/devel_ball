@@ -13,7 +13,6 @@ from mongoengine import (
 
 
 class Player(Document):
-
     """  NBA Player representation. """
     unique_id = StringField(primary_key=True)
     name = StringField()
@@ -21,8 +20,12 @@ class Player(Document):
                                     # list of games in that season
 
 
-class Team(Document):
+class DraftKingsPlayer(Document):
+    dk_name = StringField(primary_key=True)
+    player = ReferenceField(Player)
 
+
+class Team(Document):
     """ Team representation. """
     unique_id = StringField(primary_key=True)
     name = StringField()
@@ -31,7 +34,6 @@ class Team(Document):
 
 
 class Official(Document):
-
     """ Official representation. """
     unique_id = StringField(primary_key=True)
     name = StringField()
@@ -40,7 +42,6 @@ class Official(Document):
 
 
 class Season(Document):
-
     """ Season representation. """
     year = StringField(primary_key=True)
     first_date = StringField()
@@ -48,7 +49,6 @@ class Season(Document):
 
 
 class GameDate(Document):
-
     """  GameDate representation. """
     date = StringField(primary_key=True)
     year = StringField()
@@ -56,7 +56,6 @@ class GameDate(Document):
 
 
 class GameTraditionalStats(EmbeddedDocument):
-
     """ Traditional stats for a player or team in a single game. """
     MIN = FloatField(default=None)  # Must convert to float, e.g. "7:15" -> 7.25
     PTS = FloatField()
@@ -77,7 +76,6 @@ class GameTraditionalStats(EmbeddedDocument):
 
 
 class GameAdvancedStats(EmbeddedDocument):
-
     """ Advanced stats for a player or team in a single game. """
     E_OFF_RATING = FloatField()
     OFF_RATING = FloatField()
@@ -104,7 +102,6 @@ class GameAdvancedStats(EmbeddedDocument):
 
 
 class GameUsageStats(EmbeddedDocument):
-
     """ Usage stats for a player in a single game. """
     PCT_FGM = FloatField()
     PCT_FGA = FloatField()
@@ -126,7 +123,6 @@ class GameUsageStats(EmbeddedDocument):
 
 
 class PlayerGame(EmbeddedDocument):
-
     """ Representation of a player's stats in a single game """
     player_id = StringField()
     home = BooleanField()
@@ -139,7 +135,6 @@ class PlayerGame(EmbeddedDocument):
 
 
 class TeamGame(EmbeddedDocument):
-
     """ Representation of a team's stats in a single game """
     home = BooleanField()
     team_id = StringField()
@@ -149,7 +144,6 @@ class TeamGame(EmbeddedDocument):
 
 
 class Game(Document):
-
     """ Game representation. """
     game_id = StringField(primary_key=True)
     date = StringField()
@@ -185,7 +179,6 @@ class OfficialSeasonDate(EmbeddedDocument):
 
 
 class OfficialSeason(Document):
-
     """ An official's stats over a season """
     official_id = StringField()
     year = StringField()
@@ -231,7 +224,6 @@ class TeamSeasonDate(EmbeddedDocument):
 
 
 class TeamSeason(Document):
-
     """ A team's stats over a season """
     team_id = StringField()
     year = StringField()
@@ -308,7 +300,6 @@ class PlayerSeasonDate(EmbeddedDocument):
 
 
 class PlayerSeason(Document):
-
     """ A player's stats over a season """
     player_id = StringField()
     year = StringField()

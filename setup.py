@@ -16,6 +16,7 @@ setuptools.setup(
         'scripts/create-pandas',
         'scripts/load-season',
         'scripts/create-model',
-        'scripts/predict-date'
+        'scripts/predict-date',
+        'scripts/add-dk-player',
     ],
 )

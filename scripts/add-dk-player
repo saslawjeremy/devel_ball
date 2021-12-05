@@ -1,0 +1,41 @@
+#!/usr/bin/env python3.7
+
+from argparse import ArgumentParser
+from mongoengine import connect
+
+from devel_ball.models import (
+    DraftKingsPlayer,
+    Player,
+)
+
+
+if __name__ == '__main__':
+
+    connect('devel_ball')
+
+    parser = ArgumentParser()
+    parser.add_argument("--dk-name", nargs="+", required=True, help='The name of the player for DraftKings')
+    parser.add_argument(
+        '--player-id',
+        default=None,
+        help='If provided, coincide the Player with this id to this entry, else, store as an ignorable player.',
+    )
+    args = parser.parse_args()
+
+    dk_name = ' '.join(args.dk_name)
+    existing_entry = DraftKingsPlayer.objects(dk_name=dk_name)
+    new_entry = DraftKingsPlayer(dk_name=dk_name)
+    if args.player_id is not None:
+        player = Player.objects(unique_id=args.player_id).limit(1).first()
+        print("Assigning player with name: {}".format(player.name))
+        new_entry.player = player
+    else:
+        print("Creating an ignorable player")
+
+    if existing_entry:
+        print("Updating entry for: {}".format(dk_name))
+        existing_entry[0].delete()
+    else:
+        print("Creating new entry for: {}".format(dk_name))
+
+    new_entry.save()
