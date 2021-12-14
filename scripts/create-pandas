@@ -2,6 +2,8 @@
 
 from argparse import ArgumentParser
 from mongoengine import connect
+from datetime import datetime
+import os
 
 from devel_ball.create_pandas import (
     create_training_dataframe,
@@ -16,9 +18,11 @@ if __name__ == '__main__':
     group.add_argument(
         '--train', action='store_true', help='Create pandas dataframe for training a model on the season'
     )
-    # TODO: handle X upcoming days, whereas now i'll just do 1 day
     group.add_argument(
-        '--predict', action='store_true', help='Create pandas dataframe for predicting in the upcoming days',
+        '--predict-today', action='store_true', help='Create pandas dataframe for predicting today',
+    )
+    group.add_argument(
+        '--predict-tomorrow', action='store_true', help='Create pandas dataframe for predicting tomorrow',
     )
     parser.add_argument('--years', default=['2018-19'], nargs='*',
                         help='Years to acquire player data for. Please use the'
@@ -27,9 +31,27 @@ if __name__ == '__main__':
     parser.add_argument('--name', default=None, help='Name for the pickle')
     args = parser.parse_args()
 
+    # Derive the current year
+    today = datetime.today()
+    if today.month >= 10:
+        current_year = "{}-{}".format(today.year, str(today.year + 1)[2:])
+    else:
+        current_year = "{}-{}".format(today.year - 1, str(today.year)[2:])
+
     # Connect to the local mongo client and devel_ball database
     mongo_client = connect('devel_ball')
     if args.train:
-        create_training_dataframe(args.years, args.name)
-    elif args.predict:
-        create_predicting_dataframe(args.years, args.name)
+        name = args.name if args.name is not None else "{}/train/{}.p".format(
+            os.environ.get("DEVEL_BALL_DATA_PATH"), args.years[0],
+        )
+        create_training_dataframe(args.years, name)
+    elif args.predict_today:
+        name = args.name if args.name is not None else "{}/predict/today.p".format(
+            os.environ.get("DEVEL_BALL_DATA_PATH")
+        )
+        create_predicting_dataframe(current_year, name, today=True)
+    elif args.predict_tomorrow:
+        name = args.name if args.name is not None else "{}/predict/tomorrow.p".format(
+            os.environ.get("DEVEL_BALL_DATA_PATH")
+        )
+        create_predicting_dataframe(current_year, name, today=False)

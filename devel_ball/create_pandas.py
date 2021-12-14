@@ -5,6 +5,7 @@ from time import sleep
 import numpy as np
 import pandas as pd
 import attr
+import pickle
 
 from draft_kings import client, Sport
 
@@ -86,33 +87,44 @@ class DK_PLAYER(object):
     vs_team_entry = attr.ib()
     home = attr.ib()
     cost = attr.ib()
+    predicting = attr.ib(default=True)
 
 
-def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_stats):
+def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats, results=None): #official_stats):
 
     game_dict = {value: None for value in GAME_VALUES}
 
     # Set basic accounting params
     game_dict['PLAYER_ID'] = player_id
-    game_dict['DATE'] = player_game.date
+    game_dict['DATE'] = date
 
-    # Set results of the game
-    for key, value in player_game.results.to_mongo().iteritems():
-        game_dict[key] = value
+    # Set results of the game if provided
+    if results is not None:
+
+        for key, value in results.to_mongo().iteritems():
+            game_dict[key] = value
+
+        # Update "calculated" result values
+        game_dict["DK_POINTS_PER_MIN"] = game_dict["DK_POINTS"] / game_dict["MIN"] if (
+            game_dict["MIN"] > 0.0
+        ) else 0.0
+        game_dict["DK_POINTS_PER_POSS"] = game_dict["DK_POINTS"] / game_dict["POSS"] if (
+            game_dict["POSS"] > 0.0
+        ) else 0.0
 
     # Set player traditional stats per game
-    for key, value in player_game.stats.per_game.to_mongo().iteritems():
+    for key, value in player_stats.per_game.to_mongo().iteritems():
         game_dict[f'{key}pg'] = value
     game_dict['REBpg'] = game_dict['OREBpg'] + game_dict['DREBpg']
-    game_dict['POSSpg'] = player_game.stats.advanced.to_mongo()['POSS']
+    game_dict['POSSpg'] = player_stats.advanced.to_mongo()['POSS']
 
     # Set player traditional stats per minute
-    for key, value in player_game.stats.per_minute.to_mongo().iteritems():
+    for key, value in player_stats.per_minute.to_mongo().iteritems():
         game_dict[f'{key}pm'] = value
     game_dict['REBpm'] = game_dict['OREBpm'] + game_dict['DREBpm']
 
     # Set player traditional stats per possession
-    for key, value in player_game.stats.per_possession.to_mongo().iteritems():
+    for key, value in player_stats.per_possession.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}pp'] = value
@@ -127,13 +139,13 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_st
                         if game_dict['FTApg'] > 0.0 else 0.0)
 
     # Set player advanced stats
-    for key, value in player_game.stats.advanced.to_mongo().iteritems():
+    for key, value in player_stats.advanced.to_mongo().iteritems():
         if key == 'POSS':
             continue
         game_dict[key] = value
 
     # Set team traditional stats
-    for key, value in team_game.stats.per_game.to_mongo().iteritems():
+    for key, value in team_stats.per_game.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}tm'] = value
@@ -146,11 +158,11 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_st
                           if game_dict['FTAtm'] > 0.0 else 0.0)
 
     # Set team advanced stats
-    for key, value in team_game.stats.advanced.to_mongo().iteritems():
+    for key, value in team_stats.advanced.to_mongo().iteritems():
         game_dict[f'{key}tm'] = value
 
     # Set opposing team traditional stats
-    for key, value in vsTeam_game.stats.per_game.to_mongo().iteritems():
+    for key, value in vs_team_stats.per_game.to_mongo().iteritems():
         if key == 'MIN':
             continue
         game_dict[f'{key}vsTm'] = value
@@ -163,7 +175,7 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_st
                             if game_dict['FTAvsTm'] > 0.0 else 0.0)
 
     # Set opposing team advanced stats
-    for key, value in vsTeam_game.stats.advanced.to_mongo().iteritems():
+    for key, value in vs_team_stats.advanced.to_mongo().iteritems():
         game_dict[f'{key}vsTm'] = value
 
     # Set official stats
@@ -171,20 +183,12 @@ def get_game_dict(player_id, player_game, team_game, vsTeam_game,): #official_st
     #    game_dict[f'{key}off'] = value
 
     # Set home
-    game_dict['HOME'] = player_game.home
+    game_dict['HOME'] = home
 
     # Set recent values, 0 being most recent
     for recent_stat in RECENT_VALUES:
-        for i, stat in enumerate(player_game.stats.recent['{}_RECENT_FIRST'.format(recent_stat)]):
+        for i, stat in enumerate(player_stats.recent['{}_RECENT_FIRST'.format(recent_stat)]):
             game_dict['RECENT_{}{}'.format(recent_stat, i)] = stat
-
-    # Update "calculated" result values
-    game_dict["DK_POINTS_PER_MIN"] = game_dict["DK_POINTS"] / game_dict["MIN"] if (
-        game_dict["MIN"] > 0.0
-    ) else 0.0
-    game_dict["DK_POINTS_PER_POSS"] = game_dict["DK_POINTS"] / game_dict["POSS"] if (
-        game_dict["POSS"] > 0.0
-    ) else 0.0
 
     return game_dict
 
@@ -236,7 +240,14 @@ def create_training_dataframe(years, pickle_name):
             #        [official_game[stat] for official_game in official_games if official_game])
 
             game_dict = get_game_dict(
-                player_season.player_id, player_game, team_game, vsTeam_game, #official_stats
+                player_id=player_season.player_id,
+                date=player_game.date,
+                player_stats=player_game.stats,
+                home=player_game.home,
+                team_stats=team_game.stats,
+                vs_team_stats=vsTeam_game.stats,
+                #official_stats,
+                results=player_game.results,
             )
             data = data.append(game_dict, ignore_index=True)
 
@@ -357,7 +368,9 @@ def get_draftkings_players_for_date(date, year):
 
         # If player is irrelevant, skip
         if dk_player_entry.player is None:
-            continue
+            player_entry = None
+        else:
+            player_entry = dk_player_entry.player
 
         # Get teams
         dk_team_id = str(dk_player['team_id'])
@@ -372,7 +385,7 @@ def get_draftkings_players_for_date(date, year):
         final_players.append(
             DK_PLAYER(
                 dk_player_entry=dk_player_entry,
-                player_entry=dk_player_entry.player,
+                player_entry=player_entry,
                 team_entry=dk_team,
                 vs_team_entry=dk_vs_team,
                 home=home,
@@ -383,11 +396,45 @@ def get_draftkings_players_for_date(date, year):
     return final_players
 
 
-def create_predicting_dataframe(years, pickle_name, today=False):
+def create_predicting_dataframe(year, pickle_name, today):
 
     # Get map of players to cost for given date
     date = datetime.datetime.today().date() if today else datetime.datetime.today().date() + timedelta(days=1)
-    dk_players = get_draftkings_players_for_date(date, years[0])
+    dk_players = get_draftkings_players_for_date(date, year)
+    if dk_players is None:
+        raise Exception("No more games on this date.")
 
+    data = pd.DataFrame(columns=GAME_VALUES)
     for dk_player in dk_players:
-        pass
+
+        if dk_player.player_entry is None:
+            print("{}: SKIPPING for no player".format(dk_player.dk_player_entry.dk_name))
+            dk_player.predicting = False
+        else:
+            player_season = PlayerSeason.objects(player_id=dk_player.player_entry.id, year=year).limit(1).first()
+            team_season = TeamSeason.objects(team_id=dk_player.team_entry.team.id, year=year).limit(1).first()
+            vs_team_season = TeamSeason.objects(team_id=dk_player.vs_team_entry.team.id, year=year).limit(1).first()
+            if not player_season:
+                print("{}: SKIPPING for no player_season".format(dk_player.dk_player_entry.dk_name))
+                dk_player.predicting = False
+            if not team_season:
+                print("{}: SKIPPING for no team_season".format(dk_player.dk_player_entry.dk_name))
+                dk_player.predicting = False
+            if not vs_team_season:
+                print("{}: SKIPPING for no vs_team_season".format(dk_player.dk_player_entry.dk_name))
+                dk_player.predicting = False
+
+        if dk_player.predicting:
+            game_dict = get_game_dict(
+                player_id=dk_player.player_entry.id,
+                date=date.isoformat(),
+                player_stats=player_season.current_stats,
+                home=dk_player.home,
+                team_stats=team_season.current_stats,
+                vs_team_stats=vs_team_season.current_stats,
+            )
+            data = data.append(game_dict, ignore_index=True)
+
+    file_name = pickle_name if pickle_name else "predict.p"
+    with open(file_name, 'wb') as f:
+        pickle.dump((dk_players, data), f)

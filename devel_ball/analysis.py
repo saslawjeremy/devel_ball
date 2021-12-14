@@ -110,7 +110,7 @@ def get_cleanup_pipeline(data):
     return full_pipeline
 
 
-def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG):
+def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, train=True):
     """
     TODO: docx
     """
@@ -118,9 +118,11 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG):
     # Shuffle the data such that it is not in order
     #data = data.sample(frac=1)
 
-    # Remove non-players that we don't want to predict based on
+    # Remove non-players that we don't want to predict based on. If train, assume we know
+    # not to predict players who didn't play in the game
     data = data[data['MINpg'] > 10.]
-    data = data[data['MIN'] > 0.0]
+    if train:
+        data = data[data['MIN'] > 0.0]
 
     # Create lists of relevant categories
     pg_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pg'] # per-game
@@ -217,11 +219,8 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG):
 
 
 def get_model(data):
-    """
-    Currently just a copy and paste of various analysis/model-creation snippets
-    """
 
-    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(data, prediction_type=PredictionType.DKPG)
+    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(data, prediction_type=PredictionType.DKPG, train=True)
 
     # Create model
     X_train_full, X_test, Y_train_full, Y_test = train_test_split(data_X, data_Y, train_size=0.85)
@@ -347,12 +346,18 @@ def predict_from_model(model, data_pipeline, data, date):
     TODO: docx
     """
 
-    data_X, data_Y, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline)
-    date_data = data_accounting[data_accounting['DATE'] == date]
+    data_X, data_Y, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline, train=False)
+    if date is not None:
+        date_data = data_accounting[data_accounting['DATE'] == date]
+    else:
+        date_data = data_accounting
     if len(date_data) == 0:
         return
     predictions = model.predict(data_X.loc[date_data.index])
+    results = {}
     for i, (_, row) in enumerate(date_data.iterrows()):
-        print(Player.objects(unique_id=row.PLAYER_ID)[0].name)
-        print(predictions[i])
-        print()
+        results[row.PLAYER_ID] = predictions[i]
+        #print(Player.objects(unique_id=row.PLAYER_ID)[0].name)
+        #print(predictions[i])
+        #print()
+    return results

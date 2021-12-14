@@ -21,7 +21,7 @@ if __name__ == '__main__':
     )
     # TODO: the year argument shouldn't be required, I can automatically detect year from date #
     parser.add_argument(
-        '--year', default='2021-22', help='Year the date is provided to predict for. TODO: deprecate.'
+        '--data-pandas', default='predicting/predict.p', help='Name of pandas file with data to predict for.'
     )
     ###############################################################################################
     parser.add_argument(
@@ -29,9 +29,14 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    # TODO (allow for internal combination of multiple pandas files for each year)
-    data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.year))
+    # This script can probably be just made for future predictions
+    data = pd.read_pickle('/Users/Jeremy/devel_ball/data/{}'.format(args.data_pandas))
+    if type(data) == tuple:
+        dk_players, data = data
     model_name = '/Users/Jeremy/devel_ball/models/{}'.format(args.model)
     model, data_pipeline = pickle.load(open(model_name, 'rb'))
 
-    predict_from_model(model, data_pipeline, data, args.date)
+    predictions = predict_from_model(model, data_pipeline, data, args.date)
+
+    # Put below in a function elsewhere
+    import IPython; IPython.embed()
