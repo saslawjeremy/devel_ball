@@ -1,0 +1,2 @@
+- Fix names being confused in get_player_from_name
+- Store positions from DK in create training pandas

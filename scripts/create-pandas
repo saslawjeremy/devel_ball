@@ -24,11 +24,11 @@ if __name__ == '__main__':
     group.add_argument(
         '--predict-tomorrow', action='store_true', help='Create pandas dataframe for predicting tomorrow',
     )
-    parser.add_argument('--years', default=['2018-19'], nargs='*',
-                        help='Years to acquire player data for. Please use the'
-                             ' format xxxx-xx, e.g. 2019-20.'
-                       )
-    parser.add_argument('--name', default=None, help='Name for the pickle')
+    parser.add_argument(
+        '--year',
+        default='2020-21',
+        help='Year to acquire player data for. Please use the format xxxx-xx, e.g. 2019-20.'
+    )
     args = parser.parse_args()
 
     # Derive the current year
@@ -41,17 +41,11 @@ if __name__ == '__main__':
     # Connect to the local mongo client and devel_ball database
     mongo_client = connect('devel_ball')
     if args.train:
-        name = args.name if args.name is not None else "{}/train/{}.p".format(
-            os.environ.get("DEVEL_BALL_DATA_PATH"), args.years[0],
-        )
-        create_training_dataframe(args.years, name)
+        name = "{}/train/{}.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"), args.year)
+        create_training_dataframe(args.year, name)
     elif args.predict_today:
-        name = args.name if args.name is not None else "{}/predict/today.p".format(
-            os.environ.get("DEVEL_BALL_DATA_PATH")
-        )
+        name = "{}/predict/today.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"))
         create_predicting_dataframe(current_year, name, today=True)
     elif args.predict_tomorrow:
-        name = args.name if args.name is not None else "{}/predict/tomorrow.p".format(
-            os.environ.get("DEVEL_BALL_DATA_PATH")
-        )
+        name = "{}/predict/tomorrow.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"))
         create_predicting_dataframe(current_year, name, today=False)

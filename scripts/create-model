@@ -17,6 +17,9 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='model.p', help='Name for the model')
     args = parser.parse_args()
 
+    for year in args.years:
+
+
     # TODO (allow for internal combination of multiple pandas files for each year)
     data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.years[0]))
 

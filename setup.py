@@ -18,5 +18,6 @@ setuptools.setup(
         'scripts/create-model',
         'scripts/predict-date',
         'scripts/add-dk-player',
+        'scripts/devel-ball-update',
     ],
 )

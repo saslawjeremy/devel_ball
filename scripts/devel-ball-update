@@ -1,0 +1,36 @@
+#/bin/bash
+
+# Get year
+current_year=$(date +"%Y")
+current_month=$(date +"%m")
+if (( current_month > 9 )); then
+    next_year=$(expr $current_year + 1)
+    YEAR=$current_year-"${next_year: -2}"
+else
+    previous_year=$(expr $current_year - 1)
+    YEAR=$previous_year-"${current_year: -2}"
+fi
+
+# Exit on any error
+set -e
+
+# Exit on SIGINT
+trap "exit" INT
+
+# Execute full year
+echo  -e "\033[33;7m ### Loading gamedates   $YEAR ###\033[0m"
+load-data --gamedates --years $YEAR
+echo  -e "\033[33;7m ### Loading games   $YEAR ###\033[0m"
+load-data --games --years $YEAR
+echo  -e "\033[33;7m ### Post-processing draftkings   $YEAR ###\033[0m"
+post-process --draftkings --years $YEAR
+echo  -e "\033[33;7m ### Post-processing official-seasons   $YEAR ###\033[0m"
+post-process --official-seasons --years $YEAR
+echo  -e "\033[33;7m ### Post-processing team-seasons   $YEAR ###\033[0m"
+post-process --team-seasons --years $YEAR
+echo  -e "\033[33;7m ### Post-processing player-seasons   $YEAR ###\033[0m"
+post-process --player-seasons --years $YEAR
+echo  -e "\033[33;7m ### Creating pandas to predict today   $YEAR ###\033[0m"
+create-pandas --predict-today
+echo  -e "\033[33;7m ### Creating pandas to predict tomorrow   $YEAR ###\033[0m"
+create-pandas --predict-tomorrow

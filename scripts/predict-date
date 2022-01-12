@@ -5,6 +5,7 @@ from argparse import ArgumentParser
 import datetime
 from mongoengine import connect
 import pickle
+import os
 
 from devel_ball.analysis import predict_from_model
 
@@ -14,29 +15,40 @@ if __name__ == '__main__':
     connect('devel_ball')
 
     parser = ArgumentParser()
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--today', action='store_true', help='Predict today.')
+    group.add_argument('--tomorrow', action='store_true', help='Predict tomorrow.')
     parser.add_argument(
-        "--date",
-        default=None,
-        help='The date to predict for, in format "year-month-day". Default of None means today will be used.',
-    )
-    # TODO: the year argument shouldn't be required, I can automatically detect year from date #
-    parser.add_argument(
-        '--data-pandas', default='predicting/predict.p', help='Name of pandas file with data to predict for.'
-    )
-    ###############################################################################################
-    parser.add_argument(
-        '--model', default='model.p', help='Name for the model to use for prediction'
+        '--model', default='2021-22_model.p', help='Name for the model to use for prediction'
     )
     args = parser.parse_args()
 
-    # This script can probably be just made for future predictions
-    data = pd.read_pickle('/Users/Jeremy/devel_ball/data/{}'.format(args.data_pandas))
-    if type(data) == tuple:
-        dk_players, data = data
-    model_name = '/Users/Jeremy/devel_ball/models/{}'.format(args.model)
+    # Get data to predict on
+    if args.today:
+        data_name = "{}/predict/today.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"))
+    else:
+        data_name = "{}/predict/tomorrow.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"))
+    dk_players, data = pd.read_pickle(data_name)
+
+    # Load the relevant model
+    model_name = "{}/{}".format(os.environ.get("DEVEL_BALL_MODELS_PATH"), args.model)
     model, data_pipeline = pickle.load(open(model_name, 'rb'))
 
-    predictions = predict_from_model(model, data_pipeline, data, args.date)
+    # Get predictions
+    predictions = predict_from_model(model, data_pipeline, data)
 
     # Put below in a function elsewhere
+    prediction_map = {}
+    for dk_player in dk_players:
+        if dk_player.player_entry is not None and dk_player.player_entry.id in predictions:
+            prediction = predictions[dk_player.player_entry.id]
+        else:
+            prediction = 0.0
+        prediction_map[dk_player.dk_player_entry.id] = prediction
+
+    sorted_prediction_map = dict(sorted(prediction_map.items(), key=lambda item: -item[1]))
+
+    for player, prediction in sorted_prediction_map.items():
+        print(player, prediction)
+
     import IPython; IPython.embed()

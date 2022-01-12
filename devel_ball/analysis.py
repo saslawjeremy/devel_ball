@@ -341,23 +341,16 @@ def get_model(data):
             break
     """
 
-def predict_from_model(model, data_pipeline, data, date):
+def predict_from_model(model, data_pipeline, data):
     """
     TODO: docx
     """
 
-    data_X, data_Y, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline, train=False)
-    if date is not None:
-        date_data = data_accounting[data_accounting['DATE'] == date]
-    else:
-        date_data = data_accounting
-    if len(date_data) == 0:
-        return
-    predictions = model.predict(data_X.loc[date_data.index])
+    data_X, _, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline, train=False)
+    if len(data_accounting) == 0:
+        return {}
+    predictions = model.predict(data_X.loc[data_accounting.index])
     results = {}
-    for i, (_, row) in enumerate(date_data.iterrows()):
+    for i, (_, row) in enumerate(data_accounting.iterrows()):
         results[row.PLAYER_ID] = predictions[i]
-        #print(Player.objects(unique_id=row.PLAYER_ID)[0].name)
-        #print(predictions[i])
-        #print()
     return results
