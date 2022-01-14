@@ -87,6 +87,7 @@ class DK_PLAYER(object):
     vs_team_entry = attr.ib()
     home = attr.ib()
     cost = attr.ib()
+    positions = attr.ib()
     predicting = attr.ib(default=True)
 
 
@@ -336,9 +337,6 @@ def get_draftkings_players_for_date(date, year):
     players_not_found = []
     for dk_player in client.available_players(dk_group_id)['players']:
 
-        # TODO (JS): Handle DK position storage
-        # print(dk_player['first_name'], dk_player['last_name'], dk_player['position'])
-
         full_name = "{} {}".format(dk_player["first_name"], dk_player["last_name"])
         dk_player_entry = DraftKingsPlayer.objects(dk_name=full_name).limit(1).first()
 
@@ -429,6 +427,10 @@ def get_draftkings_players_for_date(date, year):
                 vs_team_entry=dk_vs_team,
                 home=home,
                 cost=dk_player["draft"]["salary"],
+                positions=[
+                    position for position in ["PG", "SG", "SF", "PF", "C"]
+                    if position in dk_player["position"]["name"]
+                ],
             )
         )
 
