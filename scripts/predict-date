@@ -24,6 +24,8 @@ if __name__ == '__main__':
     )
     parser.add_argument('--ignore', default=[], nargs='*', help='Players to ignore when making lineup')
     parser.add_argument('--must-include', default=[], nargs='*', help='Players that must be included')
+    parser.add_argument('--lineups', default=1, type=int, help="How many lineups to generate")
+    parser.add_argument('--debug', action='store_true', help='Print chosen players unordered for debug')
     args = parser.parse_args()
 
     # Get data to predict on
@@ -39,5 +41,12 @@ if __name__ == '__main__':
 
     # Optimize lineup
     optimize_lineup(
-        dk_players, data, model, data_pipeline, players_remove=args.ignore, players_add=args.must_include
+        dk_players=dk_players,
+        prediction_data=data,
+        model=model,
+        model_data_pipeline=data_pipeline,
+        players_remove=args.ignore,
+        players_add=args.must_include,
+        lineups=args.lineups,
+        debug=args.debug,
     )

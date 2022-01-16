@@ -4,8 +4,7 @@ import numpy as np
 from devel_ball.analysis import predict_from_model
 
 
-def get_sorted_players(prediction_map, print_option=None):
-
+def get_sorted_players(prediction_map):
     # Sort the predictions by total points
     sorted_predictions_by_total_points = dict(
         sorted(prediction_map.items(), key=lambda item: -item[1][0])
@@ -14,20 +13,6 @@ def get_sorted_players(prediction_map, print_option=None):
     sorted_predictions_by_value = dict(
         sorted(prediction_map.items(), key=lambda item: -item[1][0] / item[1][1].cost)
     )
-
-    # Print one of them if the option is provided
-    def print_helper(sorted_predictions):
-        for player, (prediction, dk_player) in sorted_predictions.items():
-            print(
-                "{}, prediction: {}, cost: {}, value: {}".format(
-                    player, prediction, dk_player.cost, round(prediction/dk_player.cost*1000, 3)
-                )
-            )
-    if print_option == 'POINTS':
-        print_helper(sorted_predictions_by_total_points)
-    elif print_option == 'VALUE':
-        print_helper(sorted_predictions_by_value)
-
     return sorted_predictions_by_total_points, sorted_predictions_by_value
 
 
@@ -186,7 +171,24 @@ def get_ordered_lineup(chosen_players):
     return lineup
 
 
-def optimize_lineup(dk_players, prediction_data, model, model_data_pipeline, players_remove=[], players_add=[]):
+def optimize_lineup(
+    dk_players,
+    prediction_data,
+    model,
+    model_data_pipeline,
+    players_remove=[],
+    players_add=[],
+    lineups=1,
+    debug=False,
+):
+
+    # For now, only supports up to (9 - players must add) lineups
+    max_lineups = 9 - len(players_add)
+    if lineups > max_lineups:
+        raise Exception(
+            "Only supports up to {} lineups when including {} must includes."
+            .format(max_lineups, len(player_add))
+        )
 
     # Get predictions
     predictions = predict_from_model(model, model_data_pipeline, prediction_data)
@@ -201,29 +203,72 @@ def optimize_lineup(dk_players, prediction_data, model, model_data_pipeline, pla
         prediction_map[dk_player.dk_player_entry.id] = (prediction, dk_player)
 
     # Get sorted versions of all players
-    sorted_predictions_by_total_points, sorted_predictions_by_value = get_sorted_players(
-        prediction_map, print_option="VALUE"
-    )
+    sorted_predictions_by_total_points, sorted_predictions_by_value = get_sorted_players(prediction_map)
 
     # Create list of players that aren't being removed
     players = [player for player in list(prediction_map.keys()) if player not in players_remove]
 
-    # Get optimal lineup
-    chosen_players, total_points, total_costs = run_lineup_optimizer(
-        prediction_map, players, must_include_players=players_add
-    )
+    def run_optimization(players):
 
-    # While still debugging problems, print the raw chosen players
-    print("Chosen players unordered:")
-    for chosen_player in chosen_players:
-        print(chosen_player)
-    print("Total cost: {}".format(total_costs))
-    print("Total predicted points: {}".format(total_points))
-    print("---------------------------")
+        # Get optimal lineup
+        chosen_players, total_points, total_costs = run_lineup_optimizer(
+            prediction_map, players, must_include_players=players_add
+        )
 
-    # Figure out lineup ordering to fulfill positional constraints, and print it
-    ordered_lineup = get_ordered_lineup(chosen_players)
-    print("Final lineup:")
-    for p in ordered_lineup:
-        print(p)
-    print("---------------------------")
+        # If debugging, print the raw chosen players
+        if debug:
+            print("Chosen players unordered:")
+            for chosen_player in chosen_players:
+                print(chosen_player)
+            print("---------------------------")
+
+        # Figure out lineup ordering to fulfill positional constraints, and print it
+        ordered_lineup = get_ordered_lineup(chosen_players)
+
+        return ordered_lineup, total_costs, total_points
+
+    # Store results from all lineups
+    results = []
+    ordered_lineup, total_costs, total_points = run_optimization(players)
+    results.append((ordered_lineup, total_costs, total_points))
+
+    # Create additional linueps, by removing 1 player from the optimal lineup at a time,
+    # starting with the least valueable player and moving up
+    players_to_remove = [
+        p[0] for p in sorted(ordered_lineup, key=lambda item: item[1]/item[2])
+        if p[0] not in players_add
+    ]
+    for i in range(0, lineups-1):
+        players = [
+            player for player in list(prediction_map.keys())
+            if player not in players_remove + [players_to_remove[i]]
+        ]
+        results.append(run_optimization(players))
+
+    # Print the players sorted by value
+    print("------------------------ Players sorted by value (points per cost): ------------------------ ")
+    print("{:30s} {:15s} {:15s} {:15s}".format("Player", "Prediction", "Cost", "Value\n"))
+    for player, (prediction, dk_player) in sorted_predictions_by_value.items():
+        print(
+            "{:30s} {:15s} {:15s} {:15s}".format(
+                player, str(round(prediction, 3)), str(dk_player.cost), str(round(prediction/dk_player.cost*1000, 3))
+            )
+        )
+    # Print the players sorted by total points
+    print("\n------------------------ Players sorted by expected points: ------------------------ ")
+    print("{:30s} {:15s} {:15s} {:15s}".format("Player", "Prediction", "Cost", "Value\n"))
+    for player, (prediction, dk_player) in sorted_predictions_by_total_points.items():
+        print(
+            "{:30s} {:15s} {:15s} {:15s}".format(
+                player, str(round(prediction, 3)), str(dk_player.cost), str(round(prediction/dk_player.cost*1000, 3))
+            )
+        )
+
+    # Print the resultant lineups
+    for (ordered_lineup, total_costs, total_points) in results:
+        print("\n------------------------ Lineup: ------------------------ ")
+        for p in ordered_lineup:
+            print(p)
+        print("Total cost: {}".format(total_costs))
+        print("Total predicted points: {}".format(total_points))
+    print("---------------------------------------------------------\n")
