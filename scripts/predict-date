@@ -8,7 +8,7 @@ import pickle
 import os
 import pulp
 
-from devel_ball.analysis import predict_from_model
+from devel_ball.lineup_optimizer import optimize_lineup
 
 
 if __name__ == '__main__':
@@ -22,6 +22,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--model', default='2021-22_model.p', help='Name for the model to use for prediction'
     )
+    parser.add_argument('--ignore', default=[], nargs='*', help='Players to ignore when making lineup')
+    parser.add_argument('--must-include', default=[], nargs='*', help='Players that must be included')
     args = parser.parse_args()
 
     # Get data to predict on
@@ -35,61 +37,7 @@ if __name__ == '__main__':
     model_name = "{}/{}".format(os.environ.get("DEVEL_BALL_MODELS_PATH"), args.model)
     model, data_pipeline = pickle.load(open(model_name, 'rb'))
 
-    # Get predictions
-    predictions = predict_from_model(model, data_pipeline, data)
-
-    # Put below in a function elsewhere
-    prediction_map = {}
-    for dk_player in dk_players:
-        if dk_player.player_entry is not None and dk_player.player_entry.id in predictions:
-            prediction = predictions[dk_player.player_entry.id]
-        else:
-            prediction = 0.0
-        prediction_map[dk_player.dk_player_entry.id] = (prediction, dk_player)
-
-    sorted_predictions_by_total_points = dict(
-        sorted(prediction_map.items(), key=lambda item: -item[1][0])
+    # Optimize lineup
+    optimize_lineup(
+        dk_players, data, model, data_pipeline, players_remove=args.ignore, players_add=args.must_include
     )
-    sorted_predictions_by_points_per_cost = dict(
-        sorted(prediction_map.items(), key=lambda item: -item[1][0] / item[1][1].cost)
-    )
-
-    #for player, (prediction, dk_player) in sorted_predictions_by_total_points.items():
-    #    print(player, prediction)
-
-    for player, (prediction, dk_player) in sorted_predictions_by_points_per_cost.items():
-        print(player, prediction, dk_player.cost, round(prediction/dk_player.cost*1000, 3))
-
-    REMOVE = ["Collin Sexton", "Ricky Rubio", "T.J. McConnell", "Malcolm Brogdon", "Derrick Walton Jr."]
-    players = [player for player in list(prediction_map.keys()) if player not in REMOVE]
-    points = {player: prediction_map[player][0] for player in players}
-    costs = {player: prediction_map[player][1].cost for player in players}
-    pgs = {player: 1 if "PG" in prediction_map[player][1].positions else 0 for player in players}
-    sgs = {player: 1 if "SG" in prediction_map[player][1].positions else 0 for player in players}
-    sfs = {player: 1 if "SF" in prediction_map[player][1].positions else 0 for player in players}
-    pfs = {player: 1 if "PF" in prediction_map[player][1].positions else 0 for player in players}
-    cs = {player: 1 if "C" in prediction_map[player][1].positions else 0 for player in players}
-
-    prob = pulp.LpProblem("Draftkings", pulp.LpMaximize)
-    player_vars = pulp.LpVariable.dicts("Players", players, 0, 1, pulp.LpBinary)
-
-    prob += pulp.lpSum([points[player] * player_vars[player] for player in players]), "Total Cost"
-    prob += pulp.lpSum([player_vars[player] for player in players]) == 8, "Total 8 Players"
-    prob += pulp.lpSum([pgs[player] * player_vars[player] for player in players]) >= 1, "At least 1 PG"
-    prob += pulp.lpSum([sgs[player] * player_vars[player] for player in players]) >= 1, "At least 1 SG"
-    prob += pulp.lpSum([sfs[player] * player_vars[player] for player in players]) >= 1, "At least 1 SF"
-    prob += pulp.lpSum([pfs[player] * player_vars[player] for player in players]) >= 1, "At least 1 PF"
-    prob += pulp.lpSum([cs[player] * player_vars[player] for player in players]) >= 1, "At least 1 C"
-    prob += pulp.lpSum([costs[player] * player_vars[player] for player in players]) <= 50000, "Total Cost"
-    prob.solve()
-    total_points = 0.0
-    total_costs = 0.0
-    for player, player_var in player_vars.items():
-        if player_var.varValue > 0:
-            total_points += points[player]
-            total_costs += costs[player]
-            print(player, points[player], costs[player], prediction_map[player][1].positions)
-    print(total_points)
-    print(total_costs)
-
-    import IPython; IPython.embed()
