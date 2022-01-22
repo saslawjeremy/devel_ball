@@ -39,3 +39,9 @@ python3 post_process.py --player-seasons --years 2018-19
 python3 create_pandas.py --years 2018-19
 
 ####################################################################
+
+Necessary environment variables are:
+
+- DEVEL_BALL_DATA_PATH
+- DEVEL_BALL_MODELS_PATH
+- DEVEL_BALL_SCRAPE_URL
