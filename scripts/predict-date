@@ -40,11 +40,12 @@ if __name__ == '__main__':
     model, data_pipeline = pickle.load(open(model_name, 'rb'))
 
     # Optimize lineup
-    optimize_lineup(
+    lineups = optimize_lineup(
         dk_players=dk_players,
         prediction_data=data,
         model=model,
         model_data_pipeline=data_pipeline,
+        scrape_url=os.environ.get("DEVEL_BALL_SCRAPE_URL"),
         players_remove=args.ignore,
         players_add=args.must_include,
         lineups=args.lineups,

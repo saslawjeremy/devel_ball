@@ -21,8 +21,13 @@ class Player(Document):
 
 
 class DraftKingsPlayer(Document):
-    dk_name = StringField(primary_key=True)
+    name = StringField(primary_key=True)
     player = ReferenceField(Player)
+
+
+class DailyFantasyFuelPlayer(Document):
+    name = StringField(primary_key=True)
+    dk_player = ReferenceField(DraftKingsPlayer)
 
 
 class Team(Document):

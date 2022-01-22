@@ -89,6 +89,9 @@ class DK_PLAYER(object):
     cost = attr.ib()
     positions = attr.ib()
     predicting = attr.ib(default=True)
+    ineligible = attr.ib(default=False)
+    ineligible_reason = attr.ib(default='')
+    injury_status = attr.ib(default='')
 
 
 def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats, results=None): #official_stats):
@@ -255,7 +258,7 @@ def create_training_dataframe(year, pickle_name):
     data.to_pickle(pickle_name if pickle_name else f'{year}.p')
 
 
-def get_player_from_name(first_name, last_name, year, previously_ignored=False):
+def get_player_from_name(first_name, last_name, year, previously_ignored=False, search_dk_players=False):
     """
     Helpful function to find the right player in the database built from nba_api from
     a string name from the draft_kings api
@@ -264,12 +267,18 @@ def get_player_from_name(first_name, last_name, year, previously_ignored=False):
     name = "{} {}".format(first_name, last_name)
 
     # Start with case insensitive exact search
-    player = Player.objects(name__iexact=name, years__exists=year)
+    if search_dk_players:
+        player = DraftKingsPlayer.objects(name__iexact=name)
+    else:
+        player = Player.objects(name__iexact=name, years__exists=year)
     if player and player.count() == 1:
         return player.first()
 
     # Next check if full name is contained inside of db name (case insensitive)
-    player = Player.objects(name__icontains=name, years__exists=year)
+    if search_dk_players:
+        player = DraftKingsPlayer.objects(name__icontains=name)
+    else:
+        player = Player.objects(name__icontains=name, years__exists=year)
     if player and player.count() == 1:
         return player.first()
 
@@ -290,13 +299,19 @@ def get_player_from_name(first_name, last_name, year, previously_ignored=False):
     # Next check if the first name or last name match 1 player in the db
     found = 0
     for part_name in [first_name, last_name]:
-        player = Player.objects(name__icontains=part_name, years__exists=year)
+        if search_dk_players:
+            player = DraftKingsPlayer.objects(name__icontains=part_name)
+        else:
+            player = Player.objects(name__icontains=part_name, years__exists=year)
         if player and player.count() == 1 and check_match(player.first()):
             return player.first()
 
     # Next check for each length of letters for last name and first name, if both are contained
     for i in range(len(first_name)):
-        players = Player.objects(name__icontains=first_name[:i+1], years__exists=year)
+        if search_dk_players:
+            players = DraftKingsPlayer.objects(name__icontains=first_name[:i+1])
+        else:
+            players = Player.objects(name__icontains=first_name[:i+1], years__exists=year)
         for i in range(len(last_name)):
             quantity = 0
             found_player = None
@@ -338,7 +353,7 @@ def get_draftkings_players_for_date(date, year):
     for dk_player in client.available_players(dk_group_id)['players']:
 
         full_name = "{} {}".format(dk_player["first_name"], dk_player["last_name"])
-        dk_player_entry = DraftKingsPlayer.objects(dk_name=full_name).limit(1).first()
+        dk_player_entry = DraftKingsPlayer.objects(name=full_name).limit(1).first()
 
         # If this player has not been found before / stored as a dk_player
         if not dk_player_entry:
@@ -348,7 +363,7 @@ def get_draftkings_players_for_date(date, year):
                 players_not_found.append(full_name)
                 continue
             dk_player_entry = DraftKingsPlayer(
-                dk_name=full_name,
+                name=full_name,
                 player=player,
             )
             dk_player_entry.save()
@@ -365,7 +380,7 @@ def get_draftkings_players_for_date(date, year):
                 print("Found previously ignored player, updating: {}".format(full_name))
                 dk_player_entry.delete()
                 dk_player_entry = DraftKingsPlayer(
-                    dk_name=full_name,
+                    name=full_name,
                     player=player,
                 )
                 dk_player_entry.save()
@@ -392,7 +407,7 @@ def get_draftkings_players_for_date(date, year):
         for player_not_found in players_not_found:
             if str.upper(input("Ignore?    {}    (y/n)? ".format(player_not_found))) == 'Y':
                 # Create an ignorable player
-                dk_player_entry = DraftKingsPlayer(dk_name=player_not_found)
+                dk_player_entry = DraftKingsPlayer(name=player_not_found)
                 dk_player_entry.save()
             else:
                 still_not_found.append(player_not_found)
@@ -449,20 +464,20 @@ def create_predicting_dataframe(year, pickle_name, today):
     for dk_player in dk_players:
 
         if dk_player.player_entry is None:
-            print("{}: SKIPPING for no player".format(dk_player.dk_player_entry.dk_name))
+            print("{}: SKIPPING for no player".format(dk_player.dk_player_entry.name))
             dk_player.predicting = False
         else:
             player_season = PlayerSeason.objects(player_id=dk_player.player_entry.id, year=year).limit(1).first()
             team_season = TeamSeason.objects(team_id=dk_player.team_entry.team.id, year=year).limit(1).first()
             vs_team_season = TeamSeason.objects(team_id=dk_player.vs_team_entry.team.id, year=year).limit(1).first()
             if not player_season:
-                print("{}: SKIPPING for no player_season".format(dk_player.dk_player_entry.dk_name))
+                print("{}: SKIPPING for no player_season".format(dk_player.dk_player_entry.name))
                 dk_player.predicting = False
             if not team_season:
-                print("{}: SKIPPING for no team_season".format(dk_player.dk_player_entry.dk_name))
+                print("{}: SKIPPING for no team_season".format(dk_player.dk_player_entry.name))
                 dk_player.predicting = False
             if not vs_team_season:
-                print("{}: SKIPPING for no vs_team_season".format(dk_player.dk_player_entry.dk_name))
+                print("{}: SKIPPING for no vs_team_season".format(dk_player.dk_player_entry.name))
                 dk_player.predicting = False
 
         if dk_player.predicting:
