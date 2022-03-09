@@ -91,7 +91,7 @@ def run_lineup_optimizer(prediction_map, players, must_include_players):
     prob += pulp.lpSum(
         [player_vars[player] for player in must_include_players]
     ) == len(must_include_players), "Must include players"
-    status = prob.solve()
+    status = prob.solve(pulp.PULP_CBC_CMD(msg=1))
 
     if status == -1:
         raise Exception("Could not optimize a lineup!")
@@ -288,7 +288,7 @@ def check_scraped_data(prediction, scraped_prediction, threshold=0.33):
         return True, "Prediction is 0.0"
     if scraped_prediction / prediction < threshold:
         return True, "Scraped prediction is {} ({}% of {})".format(
-            scraped_prediction, scraped_prediction*100/prediction, prediction,
+            scraped_prediction, round(scraped_prediction*100/prediction, 3), round(prediction, 3),
         )
     return False, ""
 
@@ -303,6 +303,7 @@ def optimize_lineup(
     players_add=[],
     lineups=1,
     debug=False,
+    skip_download=False,
 ):
 
     # For now, only supports up to (9 - players must add) lineups
@@ -330,7 +331,7 @@ def optimize_lineup(
 
     # Scrape web for predictions to see who to ignore
     # TODO (JS) check date
-    scraped_data = scrape(scrape_url)
+    scraped_data = scrape(scrape_url, skip_download)
     for player, (prediction, dk_player) in prediction_map.items():
         # See if player was scraped
         if dk_player.dk_player_entry in scraped_data:
@@ -374,6 +375,7 @@ def optimize_lineup(
 
         return ordered_lineup, total_costs, total_points
 
+    # TODO (JS): removing this is temporary to print results and debug negative predictions
     # Store results from all lineups
     results = []
     ordered_lineup, total_costs, total_points = run_optimization(players)
@@ -433,7 +435,7 @@ def optimize_lineup(
                 "{:30s} {:10s} {:15s} {:15s} {}".format(
                     player,
                     prediction_map[player][1].injury_status,
-                    str(points),
+                    str(round(points, 3)),
                     str(cost),
                     positions,
                 )

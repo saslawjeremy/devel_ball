@@ -3,6 +3,7 @@
 import pandas as pd
 from argparse import ArgumentParser
 import pickle
+import os
 
 from devel_ball.analysis import get_model
 
@@ -17,11 +18,30 @@ if __name__ == '__main__':
     parser.add_argument('--name', default='model.p', help='Name for the model')
     args = parser.parse_args()
 
-    for year in args.years:
+    # Ensure model name provided ends in .p
+    if args.name[-2:] != '.p':
+        raise Exception("Filename must end in '.p'")
 
+    # Combine all passed inyears
+    data = pd.read_pickle("{}/train/{}.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"), args.years[0]))
+    for year in args.years[1:]:
+        data = data.append(
+            pd.read_pickle("{}/train/{}.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"), year))
+        )
+    data = data.reset_index()  # Ensure unique indexes for each row
+    data = data.drop('index', axis=1)  # Remove the index column
 
-    # TODO (allow for internal combination of multiple pandas files for each year)
-    data = pd.read_pickle('~/devel_ball/data/pandas/{}.p'.format(args.years[0]))
-
+    # Create model and data pipeline for data to the model
     model, data_pipeline = get_model(data)
-    pickle.dump((model, data_pipeline), open(args.name, 'wb'))
+
+    # Dump to the proper location
+    filename = "{}/{}".format(os.environ.get("DEVEL_BALL_MODELS_PATH"), args.name)
+    # Try to dump via pickle, but certain models (i.e. keras) don't pickle, in which case we'll
+    # use the special format where the pickle is just the data pipeline and the model will be a
+    # directory
+    try:
+        pickle.dump((model, data_pipeline), open(filename, 'wb'))
+    except TypeError:
+        pickle.dump(data_pipeline, open(filename, 'wb'))
+        model_dir = filename[:-2] + '/'
+        model.save(model_dir)

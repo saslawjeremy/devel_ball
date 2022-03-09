@@ -7,6 +7,7 @@ from mongoengine import connect
 import pickle
 import os
 import pulp
+from keras.models import load_model
 
 from devel_ball.lineup_optimizer import optimize_lineup
 
@@ -20,13 +21,18 @@ if __name__ == '__main__':
     group.add_argument('--today', action='store_true', help='Predict today.')
     group.add_argument('--tomorrow', action='store_true', help='Predict tomorrow.')
     parser.add_argument(
-        '--model', default='2021-22_model.p', help='Name for the model to use for prediction'
+        '--model', default='2020-21_model.p', help='Name for the model to use for prediction'
     )
     parser.add_argument('--ignore', default=[], nargs='*', help='Players to ignore when making lineup')
     parser.add_argument('--must-include', default=[], nargs='*', help='Players that must be included')
     parser.add_argument('--lineups', default=1, type=int, help="How many lineups to generate")
     parser.add_argument('--debug', action='store_true', help='Print chosen players unordered for debug')
+    parser.add_argument('--skip-download', action='store_true', help='Skip downloading scraped data.')
     args = parser.parse_args()
+
+    # Ensure model name provided ends in .p
+    if args.model[-2:] != '.p':
+        raise Exception("Filename must end in '.p'")
 
     # Get data to predict on
     if args.today:
@@ -35,9 +41,15 @@ if __name__ == '__main__':
         data_name = "{}/predict/tomorrow.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"))
     dk_players, data = pd.read_pickle(data_name)
 
-    # Load the relevant model
+    # Load the relevant model, which may be in 1 of 2 formats:
+    # 1) pickle with (model, data_pipeline)
+    # 2) pickle of data_pipeline, corresponding directory of model to load
     model_name = "{}/{}".format(os.environ.get("DEVEL_BALL_MODELS_PATH"), args.model)
-    model, data_pipeline = pickle.load(open(model_name, 'rb'))
+    try:
+        model, data_pipeline = pickle.load(open(model_name, 'rb'))
+    except TypeError:
+        data_pipeline = pickle.load(open(model_name, 'rb'))
+        model = load_model(model_name[:-2] + '/')
 
     # Optimize lineup
     lineups = optimize_lineup(
@@ -50,4 +62,5 @@ if __name__ == '__main__':
         players_add=args.must_include,
         lineups=args.lineups,
         debug=args.debug,
+        skip_download=args.skip_download,
     )

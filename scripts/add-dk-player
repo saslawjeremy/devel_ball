@@ -23,8 +23,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     dk_name = ' '.join(args.dk_name)
-    existing_entry = DraftKingsPlayer.objects(dk_name=dk_name)
-    new_entry = DraftKingsPlayer(dk_name=dk_name)
+    existing_entry = DraftKingsPlayer.objects(name=dk_name)
+    new_entry = DraftKingsPlayer(name=dk_name)
     if args.player_id is not None:
         player = Player.objects(unique_id=args.player_id).limit(1).first()
         print("Assigning player with name: {}".format(player.name))

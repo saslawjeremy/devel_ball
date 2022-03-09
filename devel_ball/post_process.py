@@ -53,6 +53,11 @@ TotalSeasonOfficialStats = recordclass('TotalSeasonOfficialStats',
     defaults=[0.0]*8
 )
 
+
+def get_dk_points(PTS, FG3M, REB, AST, STL, BLK, TO):
+    return 1.0*PTS + 0.5*FG3M + 1.25*REB + 1.5*AST + 2.0*STL + 2.0*BLK - 0.5*TO
+
+
 def add_draftkings(years):
     """
     Add draftkings totals for each player for each game played in years
@@ -107,14 +112,14 @@ def add_draftkings(years):
                 # Iterate over each player in that given game
                 for player_id, player_game in game.player_games.items():
                     stats = player_game.traditional_stats
-                    dk_points = (
-                        1.0*stats.PTS
-                        + 0.5*stats.FG3M
-                        + 1.25*(stats.OREB + stats.DREB)
-                        + 1.5*stats.AST
-                        + 2.0*stats.STL
-                        + 2.0*stats.BLK
-                        - 0.5*stats.TO
+                    dk_points = get_dk_points(
+                        stats.PTS,
+                        stats.FG3M,
+                        stats.OREB + stats.DREB,
+                        stats.AST,
+                        stats.STL,
+                        stats.BLK,
+                        stats.TO,
                     )
                     double_digit_counter = 0
                     double_digit_counter += 1 if stats.PTS>=10.0 else 0

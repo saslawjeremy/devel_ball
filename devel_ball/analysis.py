@@ -3,6 +3,8 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from enum import Enum
+from copy import deepcopy
+import itertools
 
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -16,7 +18,10 @@ from sklearn.base import (
     TransformerMixin,
 )
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import (
+    LinearRegression,
+    Ridge,
+)
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import cross_val_score
 from tensorflow import keras
@@ -27,6 +32,7 @@ from keras.layers import GRU, Dense, LSTM
 from keras.callbacks import EarlyStopping
 
 from devel_ball.models import Player
+from devel_ball.post_process import get_dk_points
 
 
 class PredictionType(Enum):
@@ -134,11 +140,31 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     # List of categories used for predictions
     predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
 
+    # Cleanup the recent categories where data may be missing
+    unique_recent_cats = set([c[:-1] for c in rec_cats])
+    random_recent_cat = list(unique_recent_cats)[0]
+    max_lag = max(
+        int(c[len(random_recent_cat):]) for c in rec_cats if random_recent_cat in c
+    )
+    for rec_cat in unique_recent_cats:
+        for i in range(1, max_lag + 1):
+            data['{}{}'.format(rec_cat, i)] = (
+                np.where(
+                    data['{}{}'.format(rec_cat, i)].isnull(),
+                    data['{}{}'.format(rec_cat, i-1)],
+                    data['{}{}'.format(rec_cat, i)]
+                )
+            )
+    # TODO (JS): try cleaning up recent stats with averages, max/min, etc.
+    # TODO (JS): add average dk points scored as a feature
+
+
     # Create dataframes pertaining to which type of data to predict from
     DKPG_data = data.copy(deep=True) # draftkings points per game prediction
-    for cat in pm_cats + pp_cats + rec_cats:
+    for cat in pm_cats + pp_cats:
         DKPG_data.pop(cat)
     DKPM_data = data.copy(deep=True) # draftkings points per minute prediction
+    # Need to create recent per_min and per_poss stats to use below
     for cat in pg_cats + pp_cats + rec_cats:
         DKPM_data.pop(cat)
     DKPP_data = data.copy(deep=True) # draftkings points per possession prediction
@@ -173,31 +199,14 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
         data_X_prepared_np = data_pipeline.fit_transform(data_X)
     else:
         data_X_prepared_np = data_pipeline.transform(data_X)
-    data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, data_X.columns)
-    #data_X_prepared = data_X_prepared[
-    #    ['PTSpg', 'FG3Mpg', 'OREBpg', 'DREBpg', 'ASTpg', 'STLpg', 'BLKpg', 'TOpg', 'MINpg', 'POSSpg']
-    #]
-
+    output_columns = list(
+        itertools.chain.from_iterable([t[2] for t in data_pipeline.transformers_])
+    )
+    data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, output_columns)
     return data_X_prepared, data_Y, data_accounting, data_pipeline
 
 
     ### TEMP - LEFTOVER NOTES FROM TESTING RECENCY DATA ON MINS IT SEEMS ###
-    # Create dataframe pertaining to recent data
-    #REC_data = data.copy(deep=True)
-    #for cat in [c for c in not_rec_cats if c not in predictions]:
-    #    REC_data.pop(cat)
-    #for cat in list(REC_data.columns):
-    #    if 'MIN' not in cat:
-    #        REC_data.pop(cat)
-    #REC_data.pop('DK_POINTS_PER_MIN')
-    # Clean up None's and Nans
-    #for i in range(1, 10):
-    #    REC_data['RECENT_MIN{}'.format(i)] = (
-    #        np.where(REC_data['RECENT_MIN{}'.format(i)].isnull(),
-    #            REC_data['RECENT_MIN{}'.format(i-1)],
-    #            REC_data['RECENT_MIN{}'.format(i)]
-    #        )
-    #    )
     # Create 3D tensor
     #tensor = []
     #for i, row in REC_data.iterrows():
@@ -217,26 +226,116 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     #####################################################################
 
 
-
 def get_model(data):
 
-    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(data, prediction_type=PredictionType.DKPG, train=True)
-
-    # Create model
+    # Get data
+    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
+        data, prediction_type=PredictionType.DKPG, train=True
+    )
     X_train_full, X_test, Y_train_full, Y_test = train_test_split(data_X, data_Y, train_size=0.85)
     X_train, X_valid, Y_train, Y_valid = train_test_split(X_train_full, Y_train_full, train_size=0.70/0.85)
 
-    lin_reg = LinearRegression()
-    lin_reg.fit(X_train_full, Y_train_full)
-    mae = mean_absolute_error(Y_test, lin_reg.predict(X_test))
-    print(mae)
+    # Create model
+    model = get_regression_model(X_train_full, Y_train_full)
+    #model = get_neural_net_model(X_train, Y_train, X_valid, Y_valid)
+    print_model(model)
 
-    return lin_reg, data_pipeline
+    # Get baseline by just looking at average dk points
+    raw_test_data = data[data.index.isin(X_test.index)]
+    baseline = get_dk_points(
+        raw_test_data['PTSpg'],
+        raw_test_data['FG3Mpg'],
+        raw_test_data['REBpg'],
+        raw_test_data['ASTpg'],
+        raw_test_data['STLpg'],
+        raw_test_data['BLKpg'],
+        raw_test_data['TOpg'],
+    )
+    baseline = baseline.reindex(X_test.index)
+
+    # Test model
+    mae = mean_absolute_error(Y_test, model.predict(X_test))
+    baseline_average = mean_absolute_error(Y_test, baseline)
+    print("\n\nMAE                            : {}".format(mae))
+    print("Baseline from average DK points: {}\n\n".format(baseline_average))
+
+    return model, data_pipeline
 
 
+def get_regression_model(X, Y, eliminate_keys=False, improvement_percent_gate=0.05):
 
-    """
-    test_data = pd.read_pickle('[\'2020-21\'].p')
+    #from xgboost import XGBRegressor
+    #model = XGBRegressor(objective="reg:squarederror", n_estimators=500)
+    #model.fit(X, Y)
+    #return model
+
+    ridge_reg = Ridge()
+    ridge_reg.fit(X, Y)
+    if not eliminate_keys:
+        return ridge_reg
+
+    # Iterate until the best final combination of keys is found
+    final_keys = []
+    final_score = 1000000000
+    final_test_ridge_reg = Ridge()
+    while True:
+        # Look for the next best key
+        best_score = 1000000000
+        best_key = None
+        test_ridge_reg = Ridge()
+        # Consider all keys not already in final_keys
+        for key in list(set(X.keys()) - set(final_keys)):
+            keys = final_keys + [key]
+            scores = cross_val_score(
+                test_ridge_reg, X[keys], Y, scoring="neg_mean_absolute_error", cv=10
+            )
+            score = -np.mean(scores)
+            if score < best_score:
+                best_score = score
+                best_key = key
+        # If new result is better than the previously found best result, update
+        if best_score < final_score and 100*(final_score - best_score) / best_score > improvement_percent_gate:
+            final_score = best_score
+            final_keys.append(best_key)
+            final_test_ridge_reg.fit(X[final_keys], Y)
+            print("\nIntermediate state, score: {}:".format(final_score))
+            for final_key_i, final_key in enumerate(final_keys):
+                print("{}: {}".format(final_key, final_test_ridge_reg.coef_[final_key_i]))
+        # Else we are no longer improving, and stop iterating
+        else:
+            break
+
+    # Remove the keys that are found to not be used
+    for key_i, key in enumerate(X.keys()):
+        # If key isn't used, set it to 0.0
+        if key not in final_keys:
+            ridge_reg.coef_[key_i] = 0.0
+        # Else key is used, set the coefficient based on the model with the proper keys
+        else:
+            ridge_reg.coef_[key_i] = final_test_ridge_reg.coef_[final_keys.index(key)]
+    ridge_reg.intercept_ = final_test_ridge_reg.intercept_
+
+    return ridge_reg
+
+
+def print_model(model):
+    if not hasattr(model, 'coef_'):
+        return
+    print("\n\nModel description:\n\n")
+    sorted_coef = sorted(enumerate(model.coef_), key=lambda vals: np.abs(vals[1]), reverse=True)
+    for feature_i, coef in sorted_coef:
+        print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
+
+
+def get_neural_net_model(X_train, Y_train, X_valid, Y_valid, scan=True):
+    if scan:
+        return _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid)
+    else:
+        return _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid)
+
+
+def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
+
     def build_model(x_train, y_train, x_val, y_val, params):
         input_layer = keras.layers.Input(x_train.shape[1:])
         latest_input_layer = input_layer
@@ -255,20 +354,20 @@ def get_model(data):
             x_train,
             y_train,
             batch_size=params['batch_size'],
-            epochs=500,
+            epochs=1000,
             validation_data=(x_val, y_val),
             callbacks=[keras.callbacks.TerminateOnNaN(), early_stopping_cb],
         )
         return out, model
 
-    p = {'n_neurons': list(np.arange(10, 200, 10)) + list(np.arange(200, 500, 20)),
+    p = {'n_neurons': list(np.arange(10, 200, 20)) + list(np.arange(200, 500, 50)),
          'n_hidden': [1, 2, 3, 4, 5],
          'activation_fn': ['relu', 'tanh'],
-         'neuron_decay': [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4],
+         'neuron_decay': [1.0, 0.8, 0.6, 0.4],
          'sequential': [True, False],
-         'learning_rate': [0.0001, 0.001, 0.01, 0.1],
+         'learning_rate': [0.001, 0.01, 0.1],
          'patience': [10],
-         'batch_size': list(np.arange(10, 240, 20)),
+         'batch_size': list(np.arange(10, 240, 30)),
     }
 
     scan = talos.Scan(
@@ -279,17 +378,21 @@ def get_model(data):
         experiment_name='test',
         x_val=X_valid,
         y_val=Y_valid,
+        val_split=0.2,
         print_params=True,
-        time_limit='2021-1-29 17:00',
+        #time_limit='2022-1-29 22:15',
         fraction_limit=0.05,
     )
 
-    with open('data.pickle', 'wb') as handle:
-        pickle.dump(scan.data, handle)
-
     import IPython; IPython.embed()
-    """
+    best_model = scan.best_model('val_loss')
+    return best_model
+    #with open('data.pickle', 'wb') as handle:
+    #    pickle.dump(scan.data, handle)
 
+def _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid):
+
+    # Create the model's layers
     input_ = keras.layers.Input(shape=X_train.shape[1:])
     hidden1 = keras.layers.Dense(150, activation="relu")(input_)
     hidden2 = keras.layers.Dense(150, activation="relu")(hidden1)
@@ -297,6 +400,7 @@ def get_model(data):
     output = keras.layers.Dense(1)(concat)
     model = keras.Model(inputs=[input_], outputs=[output])
 
+    # Train the model
     sgd = keras.optimizers.SGD(learning_rate=0.01)
     model.compile(loss="mean_absolute_error", optimizer=sgd)
     early_stopping_cb = keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
@@ -308,43 +412,11 @@ def get_model(data):
         validation_data=(X_valid, Y_valid),
         callbacks=[early_stopping_cb],
     )
-    model.evaluate(X_test, Y_test)
 
-    import IPython; IPython.embed()
+    return model
 
-    """
-    permanent_keys = []
-    permanent_value = 1000000000
-    while True:
-        best_value = 1000000
-        best_key = "hi"
-        lin_reg = LinearRegression()
-        for key in data_X_prepared.keys():
-            keys = permanent_keys
-            if key not in keys:
-                keys.append(key)
-            scores = cross_val_score(lin_reg, data_X_prepared[keys], data_Y['DK_POINTS'],
-                                     scoring="neg_mean_squared_error", cv=10)
-            grade = np.mean(np.sqrt(-scores))
-            if grade < best_value:
-                best_value = grade
-                best_key = key
-        if best_value < permanent_value:
-            permanent_value = best_value
-            permanent_keys.append(best_key)
-            print(permanent_value)
-            print(permanent_keys)
-            lin_reg.fit(data_X_prepared[permanent_keys], data_Y['DK_POINTS'])
-            print(lin_reg.coef_)
-            print("")
-        else:
-            break
-    """
 
 def predict_from_model(model, data_pipeline, data):
-    """
-    TODO: docx
-    """
 
     data_X, _, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline, train=False)
     if len(data_accounting) == 0:
@@ -352,5 +424,6 @@ def predict_from_model(model, data_pipeline, data):
     predictions = model.predict(data_X.loc[data_accounting.index])
     results = {}
     for i, (_, row) in enumerate(data_accounting.iterrows()):
-        results[row.PLAYER_ID] = predictions[i]
+        # Handle whether model returned float or numpy array with 1 float
+        results[row.PLAYER_ID] = predictions[i] if isinstance(predictions[i], float) else predictions[i][0]
     return results

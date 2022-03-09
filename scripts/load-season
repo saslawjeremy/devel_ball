@@ -16,6 +16,4 @@ post-process --draftkings --years $YEAR
 post-process --official-seasons --years $YEAR
 post-process --team-seasons --years $YEAR
 post-process --player-seasons --years $YEAR
-create-pandas --train --years $YEAR --name ~/devel_ball/data/pandas/$YEAR.p
-create-pandas --predict-today --name ~/devel_ball/data/pandas/predict-today.p
-create-pandas --predict-tomorrow --name ~/devel_ball/data/pandas/predict-tomorrow.p
+create-pandas --train --year $YEAR --train
