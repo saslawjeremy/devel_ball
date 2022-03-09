@@ -121,14 +121,24 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     TODO: docx
     """
 
-    # Shuffle the data such that it is not in order
-    #data = data.sample(frac=1)
-
     # Remove non-players that we don't want to predict based on. If train, assume we know
     # not to predict players who didn't play in the game
     data = data[data['MINpg'] > 10.]
     if train:
         data = data[data['MIN'] > 0.0]
+
+    ### TODO (JS): Testing adding dk points as a predictive feature here ###
+    DK_POINTSpg = get_dk_points(
+        data['PTSpg'],
+        data['FG3Mpg'],
+        data['REBpg'],
+        data['ASTpg'],
+        data['STLpg'],
+        data['BLKpg'],
+        data['TOpg'],
+    )
+    #data['DK_POINTSpg'] = DK_POINTSpg
+    ###
 
     # Create lists of relevant categories
     pg_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pg'] # per-game
@@ -156,7 +166,6 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
                 )
             )
     # TODO (JS): try cleaning up recent stats with averages, max/min, etc.
-    # TODO (JS): add average dk points scored as a feature
 
 
     # Create dataframes pertaining to which type of data to predict from
@@ -232,8 +241,14 @@ def get_model(data):
     data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
         data, prediction_type=PredictionType.DKPG, train=True
     )
-    X_train_full, X_test, Y_train_full, Y_test = train_test_split(data_X, data_Y, train_size=0.85)
-    X_train, X_valid, Y_train, Y_valid = train_test_split(X_train_full, Y_train_full, train_size=0.70/0.85)
+    X_train_full, X_test, Y_train_full, Y_test = train_test_split(
+        data_X, data_Y, train_size=0.85,
+        #shuffle=False, random_state=42,  # Uncomment for deterministic testing
+    )
+    X_train, X_valid, Y_train, Y_valid = train_test_split(
+        X_train_full, Y_train_full, train_size=0.70/0.85,
+        #shuffle=False, random_state=42,  # Uncomment for deterministic testing
+    )
 
     # Create model
     model = get_regression_model(X_train_full, Y_train_full)
@@ -258,6 +273,7 @@ def get_model(data):
     baseline_average = mean_absolute_error(Y_test, baseline)
     print("\n\nMAE                            : {}".format(mae))
     print("Baseline from average DK points: {}\n\n".format(baseline_average))
+    import IPython; IPython.embed()
 
     return model, data_pipeline
 
@@ -321,7 +337,7 @@ def get_regression_model(X, Y, eliminate_keys=False, improvement_percent_gate=0.
 def print_model(model):
     if not hasattr(model, 'coef_'):
         return
-    print("\n\nModel description:\n\n")
+    print("\nModel description:")
     sorted_coef = sorted(enumerate(model.coef_), key=lambda vals: np.abs(vals[1]), reverse=True)
     for feature_i, coef in sorted_coef:
         print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
