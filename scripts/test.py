@@ -3,10 +3,92 @@ from selenium.webdriver.common.by import By
 from selenium import webdriver
 from time import sleep
 import pandas
+import attr
+
+
+@attr.s
+class CATEGORY(object):
+    name = attr.ib()
+    category = attr.ib()
+    subcategory = attr.ib()
+
+
+CATEGORIES = [
+    CATEGORY(
+        name='Points',
+        category='player-points',
+        subcategory='points',
+    ),
+    CATEGORY(
+        name='Rebounds',
+        category='player-rebounds',
+        subcategory='rebounds',
+    ),
+    CATEGORY(
+        name='Assists',
+        category='player-assists',
+        subcategory='assists',
+    ),
+    CATEGORY(
+        name='Threes',
+        category='player-threes',
+        subcategory='threes',
+    ),
+    CATEGORY(
+        name='Pts+Reb+Ast',
+        category='player-combos',
+        subcategory='pts-+-reb-+-ast',
+    ),
+    # TODO (JS): support later
+    # CATEGORY(
+    #     name='Double Double',
+    #     category='player-combos',
+    #     subcategory='double-double',
+    # ),
+    # CATEGORY(
+    #     name='Triple Double',
+    #     category='player-combos',
+    #     subcategory='triple-double',
+    # ),
+    CATEGORY(
+        name='Pts+Reb',
+        category='player-combos',
+        subcategory='pts-+-reb',
+    ),
+    CATEGORY(
+        name='Pts+Ast',
+        category='player-combos',
+        subcategory='pts-+-ast',
+    ),
+    CATEGORY(
+        name='Ast+Reb',
+        category='player-combos',
+        subcategory='ast-+-reb',
+    ),
+    CATEGORY(
+        name='Blocks',
+        category='player-blocks/steals',
+        subcategory='blocks-',
+    ),
+    CATEGORY(
+        name='Steals',
+        category='player-blocks/steals',
+        subcategory='steals-',
+    ),
+    CATEGORY(
+        name='Steals+Blocks',
+        category='player-blocks/steals',
+        subcategory='steals-+-blocks',
+    ),
+    CATEGORY(
+        name='Turnovers',
+        category='player-turnovers',
+        subcategory='turnovers',
+    ),
+]
+
 
 def get_data(driver, url):
-
-    print("Scraping data: {}".format(url))
 
     # Load page and sleep so it finishes loading
     driver.get(url)
@@ -68,15 +150,15 @@ def get_data(driver, url):
         print("\n")
 
 def get_all_data(driver):
-
-    url = 'https://sportsbook.draftkings.com/leagues/basketball/nba?category=player-points'
-    datatype = 'POINTS'
-    print("\nGetting data for: {}".format(datatype))
-    get_data(driver, url)
+    for category in CATEGORIES:
+        url = 'https://sportsbook.draftkings.com/leagues/basketball/nba?category={}&subcategory={}'.format(category.category, category.subcategory)
+        print("\nGetting data for: {}".format(category.name))
+        print("Scraping: {}".format(url))
+        get_data(driver, url)
 
 def main():
     options = Options()
-    options.add_argument("window-size=2000,1200")  # Open big enough to see download button (it can dissapear)
+    options.add_argument("window-size=2000,1200")
     try:
         # Create driver
         driver = webdriver.Chrome(options=options)
