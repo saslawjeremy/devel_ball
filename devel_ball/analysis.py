@@ -145,7 +145,6 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     pm_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pm'] # per-minute
     pp_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pp'] # per-possession
     rec_cats = [cat for cat in list(data.columns) if cat[:6] == 'RECENT'] # recent-cats
-    not_rec_cats = [cat for cat in list(data.columns) if cat[:6] != 'RECENT'] # not-recent-cats
 
     # List of categories used for predictions
     predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
@@ -165,6 +164,8 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
                     data['{}{}'.format(rec_cat, i)]
                 )
             )
+        # Try adding different recent averages (last 3 games, 5 games, 10 games, etc.)
+        #data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
     # TODO (JS): try cleaning up recent stats with averages, max/min, etc.
 
 
@@ -238,16 +239,17 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
 def get_model(data):
 
     # Get data
+    prediction_type = PredictionType.DKPG
     data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
-        data, prediction_type=PredictionType.DKPG, train=True
+        data, prediction_type=prediction_type, train=True
     )
     X_train_full, X_test, Y_train_full, Y_test = train_test_split(
         data_X, data_Y, train_size=0.85,
-        #shuffle=False, random_state=42,  # Uncomment for deterministic testing
+        shuffle=False, random_state=42,  # Uncomment for deterministic testing
     )
     X_train, X_valid, Y_train, Y_valid = train_test_split(
         X_train_full, Y_train_full, train_size=0.70/0.85,
-        #shuffle=False, random_state=42,  # Uncomment for deterministic testing
+        shuffle=False, random_state=42,  # Uncomment for deterministic testing
     )
 
     # Create model
@@ -257,28 +259,33 @@ def get_model(data):
 
     # Get baseline by just looking at average dk points
     raw_test_data = data[data.index.isin(X_test.index)]
+    letter = {
+        PredictionType.DKPG: 'g', PredictionType.DKPM: 'm', PredictionType.DKPP: 'p'
+    }[prediction_type]
     baseline = get_dk_points(
-        raw_test_data['PTSpg'],
-        raw_test_data['FG3Mpg'],
-        raw_test_data['REBpg'],
-        raw_test_data['ASTpg'],
-        raw_test_data['STLpg'],
-        raw_test_data['BLKpg'],
-        raw_test_data['TOpg'],
+        raw_test_data[f'PTSp{letter}'],
+        raw_test_data[f'FG3Mp{letter}'],
+        raw_test_data[f'REBp{letter}'],
+        raw_test_data[f'ASTp{letter}'],
+        raw_test_data[f'STLp{letter}'],
+        raw_test_data[f'BLKp{letter}'],
+        raw_test_data[f'TOp{letter}'],
     )
     baseline = baseline.reindex(X_test.index)
 
     # Test model
     mae = mean_absolute_error(Y_test, model.predict(X_test))
     baseline_average = mean_absolute_error(Y_test, baseline)
+    improvement = 100 * (baseline_average - mae) / baseline_average
     print("\n\nMAE                            : {}".format(mae))
-    print("Baseline from average DK points: {}\n\n".format(baseline_average))
+    print("Baseline from average DK points: {}".format(baseline_average))
+    print("Improvement over baseline      : {} %\n\n".format(round(improvement, 2)))
     import IPython; IPython.embed()
 
     return model, data_pipeline
 
 
-def get_regression_model(X, Y, eliminate_keys=False, improvement_percent_gate=0.05):
+def get_regression_model(X, Y, eliminate_keys=False, improvement_percent_gate=0.005):
 
     #from xgboost import XGBRegressor
     #model = XGBRegressor(objective="reg:squarederror", n_estimators=500)

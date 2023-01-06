@@ -24,6 +24,11 @@ from .models import (
 )
 from .stat_calculation_utils import *
 
+
+# Needed because recordclass doesn't support access by variable (i.e. ['MIN'])
+def recordclass_updater(self, key, change):
+    setattr(self, key, getattr(self, key) + change)
+
 PlayerTotalSeasonStats = recordclass('PlayerTotalSeasonStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
         'AST', 'STL', 'BLK', 'TO', 'PF', 'PLUS_MINUS', 'POSS',
@@ -34,11 +39,13 @@ PlayerTotalSeasonStats = recordclass('PlayerTotalSeasonStats',
         'vsTmPF', 'vsTmPLUS_MINUS', 'vsTmPOSS'],
     defaults=[0.0]*52
 )
+PlayerTotalSeasonStats.update = recordclass_updater
 
 PlayerLastGameStats = recordclass('PlayerLastGameStats',
     ['MIN', 'POSS', 'USG_PCT', 'PTS', 'REB', 'AST', 'STL', 'BLK', 'TO'],
     defaults=[0.0]*9
 )
+PlayerLastGameStats.update = recordclass_updater
 
 TeamTotalSeasonStats = recordclass('TeamTotalSeasonStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -47,11 +54,13 @@ TeamTotalSeasonStats = recordclass('TeamTotalSeasonStats',
         'vsDREB', 'vsAST', 'vsSTL', 'vsBLK', 'vsTO', 'vsPF', 'vsPLUS_MINUS', 'vsPOSS'],
     defaults=[0.0]*35
 )
+TeamTotalSeasonStats.update = recordclass_updater
 
 TotalSeasonOfficialStats = recordclass('TotalSeasonOfficialStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FTA', 'POSS'],
     defaults=[0.0]*8
 )
+TotalSeasonOfficialStats.update = recordclass_updater
 
 
 def get_dk_points(PTS, FG3M, REB, AST, STL, BLK, TO):
@@ -198,7 +207,7 @@ def add_official_season_data(years):
 
                 # Get the stats from the game
                 team_games = list(game.team_games.values())
-                print(f"Game {season_index}: "
+                print(f"Game {season_index+1}: "
                       f"{Team.objects(unique_id=team_games[0].team_id)[0].name} vs. "
                       f"{Team.objects(unique_id=team_games[1].team_id)[0].name}")
 
@@ -239,10 +248,10 @@ def load_team_advanced_stats(game_advanced_stats, stats):
 def update_team_total_stats(total_stats, team_game, vs_team_game):
     total_stats.GAMES += 1
     for stat in team_game.traditional_stats:
-        total_stats[stat] += team_game.traditional_stats[stat]
+        total_stats.update(stat, team_game.traditional_stats[stat])
     total_stats.POSS += team_game.advanced_stats.POSS
     for vs_stat in vs_team_game.traditional_stats:
-        total_stats[f'vs{vs_stat}'] += vs_team_game.traditional_stats[vs_stat]
+        total_stats.update(f'vs{vs_stat}', vs_team_game.traditional_stats[vs_stat])
     total_stats.vsPOSS += vs_team_game.advanced_stats.POSS
 
 
@@ -293,7 +302,7 @@ def add_team_season_data(years):
                 season_date.home = team_game.home
                 season_date.opposing_team_id = team_game.opposing_team_id
                 vs_team_game = game.team_games[team_game.opposing_team_id]
-                print(f"Game {season_index}: {team.name} vs. "
+                print(f"Game {season_index+1}: {team.name} vs. "
                       f"{Team.objects(unique_id=team_game.opposing_team_id)[0].name}")
 
                 team_season.season_stats.append(season_date)
@@ -369,28 +378,28 @@ def load_player_stats(stats_to_update, stats, last_game_stats):
     for recent_stat_name in recent_stats:
         stat_name = recent_stat_name.split('_RECENT_FIRST')[0]
         recent_stats[recent_stat_name][1:] = recent_stats[recent_stat_name][:-1]
-        recent_stats[recent_stat_name][0] = last_game_stats[stat_name]
+        recent_stats[recent_stat_name][0] = getattr(last_game_stats, stat_name)
 
 
 def update_player_total_stats(total_stats, player_game, team_game, opposing_team_game):
     total_stats.GAMES += 1
     for stat in player_game.traditional_stats:
-        total_stats[stat] += player_game.traditional_stats[stat]
+        total_stats.update(stat, player_game.traditional_stats[stat])
     total_stats.POSS += player_game.advanced_stats.POSS
     for Tm_stat in team_game.traditional_stats:
-        total_stats[f'Tm{Tm_stat}'] += team_game.traditional_stats[Tm_stat]
+        total_stats.update(f'Tm{Tm_stat}', team_game.traditional_stats[Tm_stat])
     total_stats.TmPOSS += team_game.advanced_stats.POSS
     for vsTm_stat in opposing_team_game.traditional_stats:
-        total_stats[f'vsTm{vsTm_stat}'] += opposing_team_game.traditional_stats[vsTm_stat]
+        total_stats.update(f'vsTm{vsTm_stat}', opposing_team_game.traditional_stats[vsTm_stat])
     total_stats.vsTmPOSS += opposing_team_game.advanced_stats.POSS
 
 
 def update_player_last_game_stats(last_game_stats, player_game):
     for stat in ['MIN', 'PTS', 'AST', 'STL', 'BLK', 'TO']:
-        last_game_stats[stat] = player_game.traditional_stats[stat]
-    last_game_stats['REB'] = player_game.traditional_stats['OREB'] + player_game.traditional_stats['DREB']
+        last_game_stats.update(stat, player_game.traditional_stats[stat])
+    last_game_stats.update('REB', player_game.traditional_stats['OREB'] + player_game.traditional_stats['DREB'])
     for stat in ['POSS', 'USG_PCT']:
-        last_game_stats[stat] = player_game.advanced_stats[stat]
+        last_game_stats.update(stat, player_game.advanced_stats[stat])
 
 
 def add_player_season_data(years):
@@ -404,7 +413,8 @@ def add_player_season_data(years):
     for year in years:
 
         # Get all players that played in this year
-        players = Player.objects.filter(__raw__={f'years.{year}': {'$exists': True}})
+        # players = Player.objects.filter(__raw__={f'years.{year}': {'$exists': True}})
+        players = [p for p in Player.objects.filter(__raw__={f'years.{year}': {'$exists': True}})]
         for player in players:
             print(f"\n{'*'*20}     Loading {player.name} in year {year}     {'*'*20}\n")
 
@@ -445,7 +455,7 @@ def add_player_season_data(years):
                 season_date.results.MIN = player_game.traditional_stats.MIN
                 season_date.results.POSS = player_game.advanced_stats.POSS
 
-                print(f"Game {season_index}: "
+                print(f"Game {season_index+1}: "
                       f"{Team.objects(unique_id=player_game.team_id)[0].name} vs. "
                       f"{Team.objects(unique_id=player_game.opposing_team_id)[0].name}")
 
