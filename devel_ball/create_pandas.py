@@ -105,7 +105,7 @@ def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats
     # Set results of the game if provided
     if results is not None:
 
-        for key, value in results.to_mongo().iteritems():
+        for key, value in results.to_mongo().to_dict().items():
             game_dict[key] = value
 
         # Update "calculated" result values
@@ -117,18 +117,18 @@ def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats
         ) else 0.0
 
     # Set player traditional stats per game
-    for key, value in player_stats.per_game.to_mongo().iteritems():
+    for key, value in player_stats.per_game.to_mongo().to_dict().items():
         game_dict[f'{key}pg'] = value
     game_dict['REBpg'] = game_dict['OREBpg'] + game_dict['DREBpg']
-    game_dict['POSSpg'] = player_stats.advanced.to_mongo()['POSS']
+    game_dict['POSSpg'] = player_stats.advanced.to_mongo().to_dict()['POSS']
 
     # Set player traditional stats per minute
-    for key, value in player_stats.per_minute.to_mongo().iteritems():
+    for key, value in player_stats.per_minute.to_mongo().to_dict().items():
         game_dict[f'{key}pm'] = value
     game_dict['REBpm'] = game_dict['OREBpm'] + game_dict['DREBpm']
 
     # Set player traditional stats per possession
-    for key, value in player_stats.per_possession.to_mongo().iteritems():
+    for key, value in player_stats.per_possession.to_mongo().to_dict().items():
         if key == 'MIN':
             continue
         game_dict[f'{key}pp'] = value
@@ -143,13 +143,13 @@ def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats
                         if game_dict['FTApg'] > 0.0 else 0.0)
 
     # Set player advanced stats
-    for key, value in player_stats.advanced.to_mongo().iteritems():
+    for key, value in player_stats.advanced.to_mongo().to_dict().items():
         if key == 'POSS':
             continue
         game_dict[key] = value
 
     # Set team traditional stats
-    for key, value in team_stats.per_game.to_mongo().iteritems():
+    for key, value in team_stats.per_game.to_mongo().to_dict().items():
         if key == 'MIN':
             continue
         game_dict[f'{key}tm'] = value
@@ -162,11 +162,11 @@ def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats
                           if game_dict['FTAtm'] > 0.0 else 0.0)
 
     # Set team advanced stats
-    for key, value in team_stats.advanced.to_mongo().iteritems():
+    for key, value in team_stats.advanced.to_mongo().to_dict().items():
         game_dict[f'{key}tm'] = value
 
     # Set opposing team traditional stats
-    for key, value in vs_team_stats.per_game.to_mongo().iteritems():
+    for key, value in vs_team_stats.per_game.to_mongo().to_dict().items():
         if key == 'MIN':
             continue
         game_dict[f'{key}vsTm'] = value
@@ -179,11 +179,11 @@ def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats
                             if game_dict['FTAvsTm'] > 0.0 else 0.0)
 
     # Set opposing team advanced stats
-    for key, value in vs_team_stats.advanced.to_mongo().iteritems():
+    for key, value in vs_team_stats.advanced.to_mongo().to_dict().items():
         game_dict[f'{key}vsTm'] = value
 
     # Set official stats
-    #for key, value in official_stats.to_mongo().iteritems():
+    #for key, value in official_stats.to_mongo().to_dict().items():
     #    game_dict[f'{key}off'] = value
 
     # Set home
@@ -203,6 +203,7 @@ def create_training_dataframe(year, pickle_name):
 
     player_seasons = PlayerSeason.objects(year=year)
     total_num = len(player_seasons)
+    list_of_all_player_data = []
     for i, player_season in enumerate(player_seasons):
         print(f'Loading {Player.objects(pk=player_season.player_id)[0].name} in '
               f'{player_season.year}   ({i}/{total_num})')
@@ -253,8 +254,9 @@ def create_training_dataframe(year, pickle_name):
                 #official_stats,
                 results=player_game.results,
             )
-            data = data.append(game_dict, ignore_index=True)
+            list_of_all_player_data.append(pd.DataFrame([game_dict]))
 
+    data = pd.concat([data, *list_of_all_player_data], ignore_index=True)
     data.to_pickle(pickle_name if pickle_name else f'{year}.p')
 
 

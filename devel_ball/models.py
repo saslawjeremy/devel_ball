@@ -192,8 +192,8 @@ class OfficialSeason(Document):
     """ An official's stats over a season """
     official_id = StringField()
     year = StringField()
-    season_stats = ListField(EmbeddedDocumentField(OfficialSeasonDate), default=[])
-    current_stats = EmbeddedDocumentField(OfficialStatsPerGame, default=OfficialStatsPerGame())
+    season_stats = ListField(EmbeddedDocumentField(OfficialSeasonDate))
+    current_stats = EmbeddedDocumentField(OfficialStatsPerGame, default=OfficialStatsPerGame)
 
 
 class TeamAdvancedStatsPerGame(EmbeddedDocument):
@@ -213,8 +213,8 @@ class TeamAdvancedStatsPerGame(EmbeddedDocument):
 
 class TeamStats(EmbeddedDocument):
     """ Various stats pertaining to a player """
-    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
-    advanced = EmbeddedDocumentField(TeamAdvancedStatsPerGame, default=TeamAdvancedStatsPerGame())
+    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
+    advanced = EmbeddedDocumentField(TeamAdvancedStatsPerGame, default=TeamAdvancedStatsPerGame)
 
 
 class TeamSeasonDate(EmbeddedDocument):
@@ -237,8 +237,8 @@ class TeamSeason(Document):
     """ A team's stats over a season """
     team_id = StringField()
     year = StringField()
-    season_stats = ListField(EmbeddedDocumentField(TeamSeasonDate), default=[])
-    current_stats = EmbeddedDocumentField(TeamStats, default=TeamStats())
+    season_stats = ListField(EmbeddedDocumentField(TeamSeasonDate))
+    current_stats = EmbeddedDocumentField(TeamStats, default=TeamStats)
 
 
 class PlayerAdvancedStatsPerGame(EmbeddedDocument):
@@ -263,15 +263,15 @@ class PlayerAdvancedStatsPerGame(EmbeddedDocument):
 
 class PlayerRecentStats(EmbeddedDocument):
     """ Player stats for the recent games """
-    MIN_RECENT_FIRST = ListField(default=[None]*10)
-    POSS_RECENT_FIRST = ListField(default=[None]*10)
-    USG_PCT_RECENT_FIRST = ListField(default=[None]*10)
-    PTS_RECENT_FIRST = ListField(default=[None]*10)
-    REB_RECENT_FIRST = ListField(default=[None]*10)
-    AST_RECENT_FIRST = ListField(default=[None]*10)
-    STL_RECENT_FIRST = ListField(default=[None]*10)
-    BLK_RECENT_FIRST = ListField(default=[None]*10)
-    TO_RECENT_FIRST = ListField(default=[None]*10)
+    MIN_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    POSS_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    USG_PCT_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    PTS_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    REB_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    AST_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    STL_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    BLK_RECENT_FIRST = ListField(default=lambda: [None]*10)
+    TO_RECENT_FIRST = ListField(default=lambda: [None]*10)
 
 
 class PlayerResults(EmbeddedDocument):
@@ -283,11 +283,11 @@ class PlayerResults(EmbeddedDocument):
 
 class PlayerStats(EmbeddedDocument):
     """ Various stats pertaining to a player """
-    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
-    per_minute = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
-    per_possession = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats())
-    advanced = EmbeddedDocumentField(PlayerAdvancedStatsPerGame, default=PlayerAdvancedStatsPerGame())
-    recent = EmbeddedDocumentField(PlayerRecentStats, default=PlayerRecentStats())
+    per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
+    per_minute = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
+    per_possession = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
+    advanced = EmbeddedDocumentField(PlayerAdvancedStatsPerGame, default=PlayerAdvancedStatsPerGame)
+    recent = EmbeddedDocumentField(PlayerRecentStats, default=PlayerRecentStats)
 
 
 class PlayerSeasonDate(EmbeddedDocument):
@@ -313,5 +313,5 @@ class PlayerSeason(Document):
     """ A player's stats over a season """
     player_id = StringField()
     year = StringField()
-    season_stats = ListField(EmbeddedDocumentField(PlayerSeasonDate), default=[])
-    current_stats = EmbeddedDocumentField(PlayerStats, default=PlayerStats())
+    season_stats = ListField(EmbeddedDocumentField(PlayerSeasonDate))
+    current_stats = EmbeddedDocumentField(PlayerStats, default=PlayerStats)

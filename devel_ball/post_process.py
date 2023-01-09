@@ -26,8 +26,11 @@ from .stat_calculation_utils import *
 
 
 # Needed because recordclass doesn't support access by variable (i.e. ['MIN'])
-def recordclass_updater(self, key, change):
-    setattr(self, key, getattr(self, key) + change)
+def recordclass_updater(self, key, change, add=True):
+    if add:
+        setattr(self, key, getattr(self, key) + change)
+    else:
+        setattr(self, key, change)
 
 PlayerTotalSeasonStats = recordclass('PlayerTotalSeasonStats',
     ['GAMES', 'MIN', 'PTS', 'FGM', 'FGA', 'FG3M', 'FG3A', 'FTM', 'FTA', 'OREB', 'DREB',
@@ -262,7 +265,6 @@ def add_team_season_data(years):
     :param years: the years to create team season data
     :type  years: list[str]
     """
-
     for year in years:
 
         # Get all teams that played in this year
@@ -377,7 +379,7 @@ def load_player_stats(stats_to_update, stats, last_game_stats):
     recent_stats = stats_to_update.recent
     for recent_stat_name in recent_stats:
         stat_name = recent_stat_name.split('_RECENT_FIRST')[0]
-        recent_stats[recent_stat_name][1:] = recent_stats[recent_stat_name][:-1]
+        recent_stats[recent_stat_name][1:] = deepcopy(recent_stats[recent_stat_name][:-1])
         recent_stats[recent_stat_name][0] = getattr(last_game_stats, stat_name)
 
 
@@ -396,10 +398,11 @@ def update_player_total_stats(total_stats, player_game, team_game, opposing_team
 
 def update_player_last_game_stats(last_game_stats, player_game):
     for stat in ['MIN', 'PTS', 'AST', 'STL', 'BLK', 'TO']:
-        last_game_stats.update(stat, player_game.traditional_stats[stat])
-    last_game_stats.update('REB', player_game.traditional_stats['OREB'] + player_game.traditional_stats['DREB'])
+        # TODO (JS): this is the issue here, update should replace nod att
+        last_game_stats.update(stat, player_game.traditional_stats[stat], add=False)
+    last_game_stats.update('REB', player_game.traditional_stats['OREB'] + player_game.traditional_stats['DREB'], add=False)
     for stat in ['POSS', 'USG_PCT']:
-        last_game_stats.update(stat, player_game.advanced_stats[stat])
+        last_game_stats.update(stat, player_game.advanced_stats[stat], add=False)
 
 
 def add_player_season_data(years):
@@ -415,8 +418,8 @@ def add_player_season_data(years):
         # Get all players that played in this year
         # players = Player.objects.filter(__raw__={f'years.{year}': {'$exists': True}})
         players = [p for p in Player.objects.filter(__raw__={f'years.{year}': {'$exists': True}})]
-        for player in players:
-            print(f"\n{'*'*20}     Loading {player.name} in year {year}     {'*'*20}\n")
+        for player_index, player in enumerate(players):
+            print(f"\n{'*'*20}     Loading {player.name} in year {year}   ({player_index+1}/{len(players)})     {'*'*20}\n")
 
             player_season = PlayerSeason()
             player_season.player_id = player.id
@@ -441,8 +444,8 @@ def add_player_season_data(years):
                     season_date.stats = PlayerStats()
                     if season_index != 1:
                         season_date.stats.recent = deepcopy(previous_recent_stats)
-                    previous_recent_stats = season_date.stats.recent
                     load_player_stats(season_date.stats, total_stats, last_game_stats)
+                    previous_recent_stats = deepcopy(season_date.stats.recent)
 
                 # Get the stats of each team in the game
                 player_game = game.player_games[player.id]
@@ -470,6 +473,7 @@ def add_player_season_data(years):
                 update_player_last_game_stats(last_game_stats, player_game)
 
             # Update the current stats at this latest point in the season
+            player_season.current_stats.recent = deepcopy(player_season.season_stats[-1].stats.recent)
             load_player_stats(player_season.current_stats, total_stats, last_game_stats)
 
             existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
