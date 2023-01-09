@@ -473,7 +473,8 @@ def add_player_season_data(years):
                 update_player_last_game_stats(last_game_stats, player_game)
 
             # Update the current stats at this latest point in the season
-            player_season.current_stats.recent = deepcopy(player_season.season_stats[-1].stats.recent)
+            if len(season_stats) > 1:
+                player_season.current_stats.recent = deepcopy(player_season.season_stats[-1].stats.recent)
             load_player_stats(player_season.current_stats, total_stats, last_game_stats)
 
             existing_player_season = PlayerSeason.objects(player_id=player.id, year=year)
