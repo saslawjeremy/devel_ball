@@ -205,7 +205,7 @@ def create_training_dataframe(year, pickle_name):
     player_seasons = PlayerSeason.objects(year=year)
     total_num = len(player_seasons)
     list_of_all_player_data = []
-    for i, player_season in enumerate(player_seasons[:2]):
+    for i, player_season in enumerate(player_seasons):
         print(f'Loading {Player.objects(pk=player_season.player_id)[0].name} in '
               f'{player_season.year}   ({i}/{total_num})')
         season_stats = player_season.season_stats
