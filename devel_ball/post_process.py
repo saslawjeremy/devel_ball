@@ -405,6 +405,20 @@ def update_player_last_game_stats(last_game_stats, player_game):
         last_game_stats.update(stat, player_game.advanced_stats[stat], add=False)
 
 
+def load_results(season_date, player_game):
+    season_date.results = PlayerResults()
+    season_date.results.DK_POINTS = player_game.draftkings_points
+    season_date.results.MIN = player_game.traditional_stats.MIN
+    season_date.results.POSS = player_game.advanced_stats.POSS
+    season_date.results.PTS = player_game.traditional_stats.PTS
+    season_date.results.REB = player_game.traditional_stats.OREB + player_game.traditional_stats.DREB
+    season_date.results.AST = player_game.traditional_stats.AST
+    season_date.results.FG3M = player_game.traditional_stats.FG3M
+    season_date.results.BLK = player_game.traditional_stats.BLK
+    season_date.results.STL = player_game.traditional_stats.STL
+    season_date.results.TO = player_game.traditional_stats.TO
+
+
 def add_player_season_data(years):
     """
     Create data for each player over the course of a given season
@@ -453,10 +467,7 @@ def add_player_season_data(years):
                 season_date.team_id = player_game.team_id
                 season_date.opposing_team_id = player_game.opposing_team_id
 
-                season_date.results = PlayerResults()
-                season_date.results.DK_POINTS = player_game.draftkings_points
-                season_date.results.MIN = player_game.traditional_stats.MIN
-                season_date.results.POSS = player_game.advanced_stats.POSS
+                load_results(season_date, player_game)
 
                 print(f"Game {season_index+1}: "
                       f"{Team.objects(unique_id=player_game.team_id)[0].name} vs. "
@@ -473,7 +484,7 @@ def add_player_season_data(years):
                 update_player_last_game_stats(last_game_stats, player_game)
 
             # Update the current stats at this latest point in the season
-            if len(season_stats) > 1:
+            if len(player_season.season_stats) > 1:
                 player_season.current_stats.recent = deepcopy(player_season.season_stats[-1].stats.recent)
             load_player_stats(player_season.current_stats, total_stats, last_game_stats)
 

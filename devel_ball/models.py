@@ -279,6 +279,13 @@ class PlayerResults(EmbeddedDocument):
     DK_POINTS = FloatField()
     MIN = FloatField()
     POSS = FloatField()
+    PTS = IntField()
+    REB = IntField()
+    AST = IntField()
+    FG3M = IntField()
+    BLK = IntField()
+    STL = IntField()
+    TO = IntField()
 
 
 class PlayerStats(EmbeddedDocument):

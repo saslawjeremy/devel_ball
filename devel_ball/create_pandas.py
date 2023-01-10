@@ -30,7 +30,8 @@ GAME_VALUES = [
     'PLAYER_ID', 'DATE',
 
     # Things to predict
-    'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS',
+    'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS', 'PTS', 'REB', 'AST',
+    'FG3M', 'BLK', 'STL', 'TO',
 
     # Player traditional stats per game
     'MINpg', 'POSSpg', 'PTSpg', 'FGMpg', 'FGApg', 'FG3Mpg', 'FG3Apg', 'FTMpg', 'FTApg',
@@ -204,7 +205,7 @@ def create_training_dataframe(year, pickle_name):
     player_seasons = PlayerSeason.objects(year=year)
     total_num = len(player_seasons)
     list_of_all_player_data = []
-    for i, player_season in enumerate(player_seasons):
+    for i, player_season in enumerate(player_seasons[:2]):
         print(f'Loading {Player.objects(pk=player_season.player_id)[0].name} in '
               f'{player_season.year}   ({i}/{total_num})')
         season_stats = player_season.season_stats
