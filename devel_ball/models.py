@@ -132,6 +132,13 @@ class GameUsageStats(EmbeddedDocument):
     PCT_PTS = FloatField()
 
 
+class PlayerRotationMinutes(EmbeddedDocument):
+    """ Tracking rotation minutes within a game. """
+    player_id = StringField()
+    in_time = FloatField()
+    out_time = FloatField()
+
+
 class PlayerGame(EmbeddedDocument):
     """ Representation of a player's stats in a single game """
     player_id = StringField()
@@ -151,6 +158,7 @@ class TeamGame(EmbeddedDocument):
     opposing_team_id = StringField()
     traditional_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats = EmbeddedDocumentField(GameAdvancedStats)
+    game_rotation = ListField(EmbeddedDocumentField(PlayerRotationMinutes))
 
 
 class Game(Document):

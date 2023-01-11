@@ -12,6 +12,7 @@ from nba_api.stats.endpoints import (
     boxscoretraditionalv2,
     boxscoreadvancedv2,
     boxscoreusagev2,
+    gamerotation,
 )
 
 from .models import (
@@ -26,6 +27,7 @@ from .models import (
     GameTraditionalStats,
     GameAdvancedStats,
     GameUsageStats,
+    PlayerRotationMinutes,
 )
 
 
@@ -134,6 +136,28 @@ def assign_all_values(mongo_entry, df):
     """
     for key in mongo_entry:
         mongo_entry[key] = df[key]
+
+
+def assign_rotation_data(team_rotation_data, team_game):
+
+    # Get the indices of relevance
+    player_id_index = team_rotation_data['headers'].index('PERSON_ID')
+    in_time_index = team_rotation_data['headers'].index('IN_TIME_REAL')
+    out_time_index = team_rotation_data['headers'].index('OUT_TIME_REAL')
+
+    # Iterate over the different rotation players in/out
+    player_segments = []
+    for player_segment in team_rotation_data['data']:
+        player_segments.append(
+            PlayerRotationMinutes(
+                player_id=str(player_segment[player_id_index]),
+                in_time=player_segment[in_time_index]/600.0,  # Convert from deciseconds to seconds
+                out_time=player_segment[out_time_index]/600.0,  # Convert from deciseconds to seconds
+            )
+        )
+
+    # Save to the team game
+    team_game.game_rotation = player_segments
 
 
 def get_gamedates(years):
@@ -345,6 +369,9 @@ def get_games(years):
                     boxscoreusagev2.BoxScoreUsageV2, game_id=game_id)
                 players_usage = clean_boxscore_df(
                     box_score_usage.sql_players_usage.get_data_frame(), index='PLAYER_ID')
+                # Game rotation
+                game_rotation = query_nba_api(
+                    gamerotation.GameRotation, game_id=game_id)
 
                 # Log the current game
                 team_names = ['{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
@@ -436,6 +463,10 @@ def get_games(years):
                     advanced_team_entry = GameAdvancedStats()
                     team_game.advanced_stats = advanced_team_entry
                     assign_all_values(advanced_team_entry, teams_advanced.loc[team_id])
+
+                    # Create rotation data
+                    team_rotation_data = game_rotation.home_team.data if team_game.home else game_rotation.away_team.data
+                    assign_rotation_data(team_rotation_data, team_game)
 
                 # Save game
                 game.save()
