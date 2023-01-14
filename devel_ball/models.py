@@ -220,16 +220,18 @@ class TeamAdvancedStatsPerGame(EmbeddedDocument):
 
 
 class LineupData(EmbeddedDocument):
-    """ A given rotation rotations for the season up until that given day. """
+    """ Rotation rotations per lineup for the season going into any given game of that season. """
     players = ListField(StringField())
-    minutes = FloatField()
+    minutes = ListField(FloatField(), default=list) # List where the index is season game, so index 1 means
+                                                    # the rotation data going into the 2nd game of the season.
+                                                    # Note the 0th index will have no data because there is no
+                                                    # minutes data going into the 1st game.
 
 
 class TeamStats(EmbeddedDocument):
     """ Various stats pertaining to a team """
     per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
     advanced = EmbeddedDocumentField(TeamAdvancedStatsPerGame, default=TeamAdvancedStatsPerGame)
-    rotations = ListField(EmbeddedDocumentField(LineupData), default=list)
 
 
 class TeamSeasonDate(EmbeddedDocument):
@@ -254,6 +256,7 @@ class TeamSeason(Document):
     year = StringField()
     season_stats = ListField(EmbeddedDocumentField(TeamSeasonDate))
     current_stats = EmbeddedDocumentField(TeamStats, default=TeamStats)
+    rotation_stats = ListField(EmbeddedDocumentField(LineupData), default=list)
 
 
 class PlayerAdvancedStatsPerGame(EmbeddedDocument):
