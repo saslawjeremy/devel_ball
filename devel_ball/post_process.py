@@ -3,6 +3,7 @@ from datetime import timedelta
 from collections import namedtuple
 from recordclass import recordclass
 from copy import deepcopy
+from sortedcontainers import SortedSet
 
 from .models import (
     Season,
@@ -21,6 +22,7 @@ from .models import (
     PlayerSeasonDate,
     PlayerStats,
     PlayerResults,
+    LineupData,
 )
 from .stat_calculation_utils import *
 
@@ -248,6 +250,16 @@ def load_team_advanced_stats(game_advanced_stats, stats):
     game_advanced_stats.TS_PCT = TS_PCT(stats.PTS, stats.FGA, stats.FTA)
 
 
+def load_rotation_stats(game_rotation, rotation_stats):
+    """
+    Update a team's rotation data going into a game for the current rotation stats
+    for that season so far.
+    """
+    # Load the stats in sorted order from most prevelant to least prevelant lineups
+    for lineup, minutes in dict(sorted(rotation_stats.items(), key=lambda item: -item[1])).items():
+        game_rotation.append(LineupData(players=lineup, minutes=minutes))
+
+
 def update_team_total_stats(total_stats, team_game, vs_team_game):
     total_stats.GAMES += 1
     for stat in team_game.traditional_stats:
@@ -256,6 +268,32 @@ def update_team_total_stats(total_stats, team_game, vs_team_game):
     for vs_stat in vs_team_game.traditional_stats:
         total_stats.update(f'vs{vs_stat}', vs_team_game.traditional_stats[vs_stat])
     total_stats.vsPOSS += vs_team_game.advanced_stats.POSS
+
+
+def update_rotation_stats(rotation_stats, team_game):
+    """ Update a team's rotation stats for the season with the current game. """
+
+    # First build the lineups played in this game, with a 1 second resolution
+    game_total_seconds = int(60 * max(player_mins.out_time for player_mins in team_game.game_rotation))
+    seconds_map = {sec: SortedSet() for sec in range(game_total_seconds)}
+    for player_mins in team_game.game_rotation:
+        for second_played in range(round(player_mins.in_time*60), round(player_mins.out_time*60)):
+            seconds_map[second_played].add(player_mins.player_id)
+
+    # Map each lineup to the seconds they've played
+    lineups_to_seconds = {}
+    for lineup_played_for_a_second in seconds_map.values():
+        lineup_played_for_a_second = tuple(lineup_played_for_a_second)
+        if lineup_played_for_a_second not in lineups_to_seconds:
+            lineups_to_seconds[lineup_played_for_a_second] = 0
+        lineups_to_seconds[lineup_played_for_a_second] += 1
+    lineups_to_minutes = {lineup: seconds/60.0 for lineup, seconds in lineups_to_seconds.items()}
+
+    # Update season rotation stats
+    for lineup, minutes in lineups_to_minutes.items():
+        if lineup not in rotation_stats:
+            rotation_stats[lineup] = 0
+        rotation_stats[lineup] += minutes
 
 
 def add_team_season_data(years):
@@ -277,6 +315,7 @@ def add_team_season_data(years):
             team_season.year = year
 
             total_stats = TeamTotalSeasonStats()
+            rotation_stats = {}
 
             # Iterate over each game that team played in this season
             for season_index, game_id in enumerate(team.years[year]):
@@ -296,6 +335,9 @@ def add_team_season_data(years):
                         )
 
                     load_team_advanced_stats(season_date.stats.advanced, total_stats)
+
+                    load_rotation_stats(season_date.stats.rotations, rotation_stats)
+                    import IPython; IPython.embed()
                 else:
                     season_date.stats = None
 
@@ -311,6 +353,7 @@ def add_team_season_data(years):
 
                 # Update total season stats for future calculations
                 update_team_total_stats(total_stats, team_game, vs_team_game)
+                update_rotation_stats(rotation_stats, team_game)
 
             # Update the current stats at this latest point in the season
             for stat in team_season.current_stats.per_game:
@@ -318,11 +361,12 @@ def add_team_season_data(years):
                     getattr(total_stats, stat)/total_stats.GAMES
                 )
             load_team_advanced_stats(team_season.current_stats.advanced, total_stats)
+            load_rotation_stats(team_season.current_stats.rotations, rotation_stats)
 
-            existing_team_season = TeamSeason.objects(team_id=team.id, year=year)
-            if len(existing_team_season) > 0:
-                existing_team_season[0].delete()
-            team_season.save()
+            #existing_team_season = TeamSeason.objects(team_id=team.id, year=year)
+            #if len(existing_team_season) > 0:
+            #    existing_team_season[0].delete()
+            #team_season.save()
 
 
 def load_player_stats(stats_to_update, stats, last_game_stats):

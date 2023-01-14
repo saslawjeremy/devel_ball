@@ -39,6 +39,7 @@ class PredictionType(Enum):
     DKPG = 1 # Draftkings points per game
     DKPM = 2 # Draftkings points per minute
     DKPP = 3 # Draftkings points per possession
+    PTS = 4  # Points
 
 
 class NegativeValueRemover(BaseEstimator, TransformerMixin):
@@ -147,7 +148,7 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     rec_cats = [cat for cat in list(data.columns) if cat[:6] == 'RECENT'] # recent-cats
 
     # List of categories used for predictions
-    predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS"]
+    predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS", 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG3M', 'TO']
 
     # Cleanup the recent categories where data may be missing
     unique_recent_cats = set([c[:-1] for c in rec_cats])
@@ -186,6 +187,7 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
         PredictionType.DKPG: DKPG_data,
         PredictionType.DKPM: DKPM_data,
         PredictionType.DKPP: DKPP_data,
+        PredictionType.PTS: DKPG_data,
     }[prediction_type]
 
     # Separate prediction data from results data
@@ -195,8 +197,9 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
         PredictionType.DKPG: 'DK_POINTS',
         PredictionType.DKPM: 'DK_POINTS_PER_MIN',
         PredictionType.DKPP: 'DK_POINTS_PER_POSS',
+        PredictionType.PTS: 'PTS',
     }[prediction_type]
-    data_Y = data_Y[predict]
+    data_Y = data_Y[predict].astype('float64')
 
     # Store accounting data
     accounting_cats = ['PLAYER_ID', 'DATE']
@@ -239,7 +242,7 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
 def get_model(data):
 
     # Get data
-    prediction_type = PredictionType.DKPG
+    prediction_type = PredictionType.PTS
     data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
         data, prediction_type=prediction_type, train=True
     )
@@ -253,12 +256,13 @@ def get_model(data):
     )
 
     # Create model
-    model = get_regression_model(X_train_full, Y_train_full)
-    #model = get_neural_net_model(X_train, Y_train, X_valid, Y_valid)
+    # model = get_regression_model(X_train_full, Y_train_full)
+    model = get_neural_net_model(X_train, Y_train, X_valid, Y_valid, scan=False)
     print_model(model)
 
     # Get baseline by just looking at average dk points
     raw_test_data = data[data.index.isin(X_test.index)]
+    """
     letter = {
         PredictionType.DKPG: 'g', PredictionType.DKPM: 'm', PredictionType.DKPP: 'p'
     }[prediction_type]
@@ -271,6 +275,8 @@ def get_model(data):
         raw_test_data[f'BLKp{letter}'],
         raw_test_data[f'TOp{letter}'],
     )
+    """
+    baseline = raw_test_data.PTSpg
     baseline = baseline.reindex(X_test.index)
 
     # Test model
@@ -389,7 +395,7 @@ def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
          'neuron_decay': [1.0, 0.8, 0.6, 0.4],
          'sequential': [True, False],
          'learning_rate': [0.001, 0.01, 0.1],
-         'patience': [10],
+         'patience': [100],
          'batch_size': list(np.arange(10, 240, 30)),
     }
 
@@ -407,7 +413,6 @@ def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
         fraction_limit=0.05,
     )
 
-    import IPython; IPython.embed()
     best_model = scan.best_model('val_loss')
     return best_model
     #with open('data.pickle', 'wb') as handle:
@@ -426,7 +431,7 @@ def _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid):
     # Train the model
     sgd = keras.optimizers.SGD(learning_rate=0.01)
     model.compile(loss="mean_absolute_error", optimizer=sgd)
-    early_stopping_cb = keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+    early_stopping_cb = keras.callbacks.EarlyStopping(patience=100, restore_best_weights=True)
     history = model.fit(
         X_train,
         Y_train,

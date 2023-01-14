@@ -31,7 +31,7 @@ from .models import (
 )
 
 
-def query_nba_api(endpoint, sleep_time=1, quiet=False, **kwargs):
+def query_nba_api(endpoint, sleep_time=1.5, fail_sleep_time=30, quiet=False, allow_error=False, **kwargs):
     """
     Query the nba_api at a safe rate
 
@@ -40,13 +40,21 @@ def query_nba_api(endpoint, sleep_time=1, quiet=False, **kwargs):
     :param sleep_time: amount to sleep before lookup to not overload the server
     :type  sleep_time: int
     """
+    sleep(sleep_time)
     if not quiet:
         print("Querying nba_api {} with args: {}".format(
             str(endpoint).split(".")[-1].split('\'')[0],
             kwargs)
         )
-    sleep(sleep_time)
-    return endpoint(**kwargs)
+    # Due to spurious networking issues, we need to keep trying if it fails
+    while True:
+        try:
+            return endpoint(**kwargs)
+        except JSONDecodeError as e:
+            if allow_error:
+                raise e
+            print("    -- Timed out, retrying! --")
+            sleep(fail_sleep_time)
 
 
 def add_entry_to_db(document_type, unique_id, name, year, game_id):
@@ -299,9 +307,11 @@ def get_games(years):
 
                 # Fetch Box Score Summary
                 try:
+                    print("ENTERING WEIRD STATE - FIXME!")
                     box_score_summary = query_nba_api(
-                        boxscoresummaryv2.BoxScoreSummaryV2, game_id=game_id)
+                        boxscoresummaryv2.BoxScoreSummaryV2, game_id=game_id, allow_error=False)
                 except JSONDecodeError:
+                    print("ENTERING WEIRD STATE - FIXME!")
                     invalid_game_ids.append(game_id)
                     # The purpose of this except block is because in 2019-20, covid led
                     # to games being cancelled. Fuck COVID.

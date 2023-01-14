@@ -219,10 +219,17 @@ class TeamAdvancedStatsPerGame(EmbeddedDocument):
     TS_PCT = FloatField()
 
 
+class LineupData(EmbeddedDocument):
+    """ A given rotation rotations for the season up until that given day. """
+    players = ListField(StringField())
+    minutes = FloatField()
+
+
 class TeamStats(EmbeddedDocument):
-    """ Various stats pertaining to a player """
+    """ Various stats pertaining to a team """
     per_game = EmbeddedDocumentField(GameTraditionalStats, default=GameTraditionalStats)
     advanced = EmbeddedDocumentField(TeamAdvancedStatsPerGame, default=TeamAdvancedStatsPerGame)
+    rotations = ListField(EmbeddedDocumentField(LineupData), default=list)
 
 
 class TeamSeasonDate(EmbeddedDocument):
