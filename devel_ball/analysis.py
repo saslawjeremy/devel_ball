@@ -41,6 +41,8 @@ PARAMS = {
 
     # The ratio of train/test data
     'train_to_test_ratio': 0.85,
+    # The ration of train to validation data
+    'train_to_validation_ratio': 0.85,
 
     # Whether or not to make the machine learning random or be seeded for deterministic results
     'random': False,
@@ -48,14 +50,14 @@ PARAMS = {
     # Parameters of the specific machine learning model
     'model': {
         'type': 'RIDGE_REGRESSION',
-    }
-    """
-    'model': {
-        'type': 'NEURAL_NET',
-        'scan': False,
-        'train_to_valid_ratio': 0.85,
-    }
-    """
+        'eliminate_keys': True,
+        'improvement_percent_gate': 0.005,
+    },
+
+    # 'model': {
+    #     'type': 'NEURAL_NET',
+    #     'scan': False,
+    # },
 
 }
 
@@ -144,7 +146,7 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     # Update the recent categories for the given prediction type if per minute or per possession.
     cats_to_update = unique_recent_cats
     if prediction_type == PredictionType.PG:
-        return
+        return data
     elif prediction_type == PredictionType.PM:
         divisor_cat = 'RECENT_MIN'
         suffix = 'pm'
@@ -172,7 +174,7 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     return data
 
 
-def filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats, rec_cats):
+def filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats):
     """
     Take the data, and filter is based on the specified prediction type. This removes the irrelevant
     categories, for example if predicting per game, remove the per minute and per possession stats
@@ -182,7 +184,6 @@ def filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_c
     :param pg_cats: the per game categories in the dataset
     :param pm_cats: the per minute categories in the dataset
     :param pp_cats: the per possession categories in the dataset
-    :param rec_cats: the recent categories in the dataset
     """
 
     # Remove categories that don't matter based on prediction type
@@ -209,41 +210,12 @@ def filter_data_for_accounting_data(data, accounting_cats):
     return data, data_accounting
 
 
-def add_features(data, prediction_stat, prediction_type):
-    """
-    Add any new features to the model for predictions.
-
-    :param data: The input data to cleanup
-    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
-    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
-    """
-    # If predicting draftkings, add draftkings points per game
-    if prediction_stat == PredictionStat.DK_POINTS:
-        DK_POINTSpg = get_dk_points(
-            data['PTSpg'],
-            data['FG3Mpg'],
-            data['REBpg'],
-            data['ASTpg'],
-            data['STLpg'],
-            data['BLKpg'],
-            data['TOpg'],
-        )
-        data['DK_POINTSpg'] = DK_POINTSpg
-
-    # TODO(JS): Try different categories for recent categories, like average last 3, 5, etc. Max/min. Weighted
-    # averages, etc.
-    # data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
-
-    # TODO (JS): Try "game stats", like averaging or adding both teams for metrics on the game's expectation
-    # of like total points, total rebounds, advanced stats too, etc.
-
-    return data
-
-
 def separate_predict_and_results_data(data, prediction_stat, prediction_type, prediction_cats):
     """
     Take the full data set, and separate it into data to use to predict with, and the results
     data that is what can be checked against.
+
+    Also convert the data to predict to the right type of category, i.e. pm or pp.
 
     :param data: The input data to cleanup
     :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
@@ -275,6 +247,47 @@ def separate_predict_and_results_data(data, prediction_stat, prediction_type, pr
     return data_X, data_Y.astype('float64')
 
 
+def add_features(data, prediction_stat, prediction_type):
+    """
+    Add any new features to the model for predictions.
+
+    1) If prediction draftkings points, add draftkings points per game
+    2) Add game stats, which are averages of both teams individual stats in the game. Currently, we still leave
+       in the individual team stats (home and away) and just add the extra stat, without removing these.
+
+    :param data: The input data to cleanup
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    """
+    # If predicting draftkings, add draftkings points per game
+    if prediction_stat == PredictionStat.DK_POINTS:
+        DK_POINTSpg = get_dk_points(
+            data['PTSpg'],
+            data['FG3Mpg'],
+            data['REBpg'],
+            data['ASTpg'],
+            data['STLpg'],
+            data['BLKpg'],
+            data['TOpg'],
+        )
+        data['DK_POINTSpg'] = DK_POINTSpg.astype('float64')
+
+    # Add "game stats" which are cumulative of the 2 teams, currently we still leave in the individual team
+    # stats too in case those are relevant as well
+    for team_stat_category in [cat[:-2] for cat in list(data.columns) if cat[-2:] == 'tm']:
+        game_stat = (
+            data['{}{}'.format(team_stat_category, 'tm')] + data['{}{}'.format(team_stat_category, 'vsTm')]
+        ) / 2.0
+        data['{}{}'.format(team_stat_category, 'gm')] = game_stat
+
+    # TODO(JS): Try different categories for recent categories, like average last 3, 5, etc. Max/min. Weighted
+    # averages, etc.
+    # data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
+    # TODO (JS): Ignore recent MIN/POSS for pm/pp
+
+    return data
+
+
 def cleanup_data(data, prediction_stat, prediction_type, prediction_cats, data_pipeline=None, train=True):
     """
     Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
@@ -303,17 +316,17 @@ def cleanup_data(data, prediction_stat, prediction_type, prediction_cats, data_p
     data = cleanup_recent_cats(data, rec_cats, prediction_type)
 
     # Filter the data
-    data = filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats, rec_cats)
+    data = filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats)
     data, data_accounting = filter_data_for_accounting_data(data, accounting_cats)
-
-    # Add new features to potentially make use of
-    data = add_features(data, prediction_stat, prediction_type)
 
     # Separate prediction data from results data, and match the results data to the desired prediction
     # stat and type
     data_X, data_Y = separate_predict_and_results_data(
         data, prediction_stat, prediction_type, prediction_cats,
     )
+
+    # Add new features to potentially make use of
+    data_X = add_features(data_X, prediction_stat, prediction_type)
 
     # Get the pipeline and clean the data
     if data_pipeline is None:
@@ -342,7 +355,7 @@ def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
 
     # Make data_Y only have the prediction_stat, and remove any denominator data like MIN or POSS
     suffix = {
-        PredictionType.PG: 'pg',
+        PredictionType.PG: '',
         PredictionType.PM: 'pm',
         PredictionType.PP: 'pp',
     }[prediction_type]
@@ -361,111 +374,38 @@ def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
     return data_X, data_Y
 
 
-def get_model(data):
+def get_regression_model(
+    X_train, Y_train, X_validation, Y_validation, random, eliminate_keys=False, improvement_percent_gate=0.005
+):
 
-    # Pull the "parameters"
-    prediction_stat = PredictionStat[PARAMS['prediction_stat']]
-    prediction_type = PredictionType[PARAMS['prediction_type']]
-    prediction_cats = PARAMS['prediction_categories']
-    train_to_test_ratio = PARAMS['train_to_test_ratio']
-    random = PARAMS['random']
-    model_params = PARAMS['model']
-
-    # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
-    # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
-    # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
-    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
-        data,
-        prediction_stat=prediction_stat,
-        prediction_type=prediction_type,
-        prediction_cats=prediction_cats,
-        train=True,
-    )
-
-    # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
-    # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
-    # predictiong PTS, and data_Y would be filtered to only PTS.
-    data_X, data_Y = filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type)
-
-    # Split data into train and test data
-    X_train, X_test, Y_train, Y_test = train_test_split(
-        data_X, data_Y, train_size=train_to_test_ratio,
-        shuffle=random, random_state=None if random else 42,
-    )
-
-    # Create the model depending on specified type
-    model_creator = {
-        ModelType.RIDGE_REGRESSION: get_regression_model,
-        ModelType.NEURAL_NET: get_neural_net_model,
-    }[ModelType[model_params['type']]]
-    print("Creating model of type: {}\n\n".format(model_params['type']))
-    model_params.pop('type')
-    model = model_creator(X_train, Y_train, random=random, **model_params)
-    print_model(model)
-
-
-    import IPython; IPython.embed()
-
-
-    # Create model
-
-    # Get baseline by just looking at average dk points
-    raw_test_data = data[data.index.isin(X_test.index)]
-    """
-    letter = {
-        PredictionType.DKPG: 'g', PredictionType.DKPM: 'm', PredictionType.DKPP: 'p'
-    }[prediction_type]
-    baseline = get_dk_points(
-        raw_test_data[f'PTSp{letter}'],
-        raw_test_data[f'FG3Mp{letter}'],
-        raw_test_data[f'REBp{letter}'],
-        raw_test_data[f'ASTp{letter}'],
-        raw_test_data[f'STLp{letter}'],
-        raw_test_data[f'BLKp{letter}'],
-        raw_test_data[f'TOp{letter}'],
-    )
-    """
-    baseline = raw_test_data.PTSpm
-    baseline = baseline.reindex(X_test.index)
-
-    # Test model
-    mae = mean_absolute_error(Y_test, model.predict(X_test))
-    baseline_average = mean_absolute_error(Y_test, baseline)
-    improvement = 100 * (baseline_average - mae) / baseline_average
-    print("\n\nMAE                            : {}".format(mae))
-    print("Baseline from average DK points: {}".format(baseline_average))
-    print("Improvement over baseline      : {} %\n\n".format(round(improvement, 2)))
-    import IPython; IPython.embed()
-
-    return model, data_pipeline
-
-
-def get_regression_model(X, Y, random, eliminate_keys=False, improvement_percent_gate=0.005):
-
-    #from xgboost import XGBRegressor
-    #model = XGBRegressor(objective="reg:squarederror", n_estimators=500)
-    #model.fit(X, Y)
-    #return model
+    def print_model(model):
+        sorted_coef = sorted(enumerate(model.coef_[0]), key=lambda vals: np.abs(vals[1]), reverse=True)
+        for feature_i, coef in sorted_coef:
+            print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
 
     ridge_reg = Ridge()
-    ridge_reg.fit(X, Y)
+    ridge_reg.fit(X_train, Y_train)
     if not eliminate_keys:
+        # TODO (JS): If we're not doing any validation, we might as well use all the data (train + validation)
+        print("\nModel description:")
+        print_model(ridge_reg)
         return ridge_reg
 
     # Iterate until the best final combination of keys is found
+    print("\nIteratively adding keys to improve the model.")
     final_keys = []
-    final_score = 1000000000
+    final_score = np.inf
     final_test_ridge_reg = Ridge()
     while True:
         # Look for the next best key
-        best_score = 1000000000
+        best_score = np.inf
         best_key = None
         test_ridge_reg = Ridge()
         # Consider all keys not already in final_keys
-        for key in list(set(X.keys()) - set(final_keys)):
+        for key in list(set(X_train.keys()) - set(final_keys)):
             keys = final_keys + [key]
             scores = cross_val_score(
-                test_ridge_reg, X[keys], Y, scoring="neg_mean_absolute_error", cv=10
+                test_ridge_reg, X_validation[keys], Y_validation, scoring="neg_mean_absolute_error", cv=10
             )
             score = -np.mean(scores)
             if score < best_score:
@@ -475,50 +415,30 @@ def get_regression_model(X, Y, random, eliminate_keys=False, improvement_percent
         if best_score < final_score and 100*(final_score - best_score) / best_score > improvement_percent_gate:
             final_score = best_score
             final_keys.append(best_key)
-            final_test_ridge_reg.fit(X[final_keys], Y)
+            final_test_ridge_reg.fit(X_train[final_keys], Y_train)
             print("\nIntermediate state, score: {}:".format(final_score))
-            for final_key_i, final_key in enumerate(final_keys):
-                print("{}: {}".format(final_key, final_test_ridge_reg.coef_[final_key_i]))
+            print_model(final_test_ridge_reg)
         # Else we are no longer improving, and stop iterating
         else:
             break
 
     # Remove the keys that are found to not be used
-    for key_i, key in enumerate(X.keys()):
+    for key_i, key in enumerate(X_train.keys()):
         # If key isn't used, set it to 0.0
         if key not in final_keys:
-            ridge_reg.coef_[key_i] = 0.0
+            ridge_reg.coef_[0][key_i] = 0.0
         # Else key is used, set the coefficient based on the model with the proper keys
         else:
-            ridge_reg.coef_[key_i] = final_test_ridge_reg.coef_[final_keys.index(key)]
+            ridge_reg.coef_[0][key_i] = final_test_ridge_reg.coef_[0][final_keys.index(key)]
     ridge_reg.intercept_ = final_test_ridge_reg.intercept_
+
+    print("\nFinal Model description:")
+    print_model(ridge_reg)
 
     return ridge_reg
 
 
-def print_model(model):
-    if not hasattr(model, 'coef_'):
-        return
-    print("\nModel description:")
-    sorted_coef = sorted(enumerate(model.coef_), key=lambda vals: np.abs(vals[1]), reverse=True)
-    for feature_i, coef in sorted_coef:
-        print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
-
-
-def get_neural_net_model(X_train, Y_train, random, train_to_valid_ratio=0.85, scan=False):
-
-    X_train, X_valid, Y_train, Y_valid = train_test_split(
-        X_train_full, Y_train_full, train_size=train_to_valid_ratio,
-        shuffle=random, random_state=None if random else 42,
-    )
-
-    if scan:
-        return _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid)
-    else:
-        return _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid)
-
-
-def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
+def _get_scanned_neural_net_model(X_train, Y_train, X_validation, Y_validation, **ignored_kwargs):
 
     def build_model(x_train, y_train, x_val, y_val, params):
         input_layer = keras.layers.Input(x_train.shape[1:])
@@ -560,8 +480,8 @@ def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
         model=build_model,
         params=p,
         experiment_name='test',
-        x_val=X_valid,
-        y_val=Y_valid,
+        x_val=X_validation,
+        y_val=Y_validation,
         val_split=0.2,
         print_params=True,
         #time_limit='2022-1-29 22:15',
@@ -573,7 +493,8 @@ def _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid):
     #with open('data.pickle', 'wb') as handle:
     #    pickle.dump(scan.data, handle)
 
-def _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid):
+
+def _get_basic_neural_net_model(X_train, Y_train, X_validation, Y_validation, **ignored_kwargs):
 
     # Create the model's layers
     input_ = keras.layers.Input(shape=X_train.shape[1:])
@@ -592,11 +513,113 @@ def _get_basic_neural_net_model(X_train, Y_train, X_valid, Y_valid):
         Y_train,
         epochs=200,
         batch_size=80,
-        validation_data=(X_valid, Y_valid),
+        validation_data=(X_validation, Y_validation),
         callbacks=[early_stopping_cb],
     )
 
     return model
+
+
+def get_neural_net_model(
+    X_train, Y_train, X_validation, Y_validation, random, train_to_valid_ratio=0.85, scan=False, **params
+):
+    model_creator = _get_scanned_neural_net_model if scan else _get_basic_neural_net_model
+    return model_creator(X_train, Y_train, X_validation, Y_validation, **params)
+
+
+def get_model(data):
+
+    # Pull the "parameters"
+    prediction_stat = PredictionStat[PARAMS['prediction_stat']]
+    prediction_type = PredictionType[PARAMS['prediction_type']]
+    prediction_cats = PARAMS['prediction_categories']
+    train_to_test_ratio = PARAMS['train_to_test_ratio']
+    train_to_validation_ratio = PARAMS['train_to_validation_ratio']
+    random = PARAMS['random']
+    model_params = PARAMS['model']
+
+    # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
+    # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
+    # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
+    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
+        data,
+        prediction_stat=prediction_stat,
+        prediction_type=prediction_type,
+        prediction_cats=prediction_cats,
+        train=True,
+    )
+
+    # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
+    # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
+    # predictiong PTS, and data_Y would be filtered to only PTS.
+    data_X, data_Y = filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type)
+
+    # Split data into train and test data
+    X_train_full, X_test, Y_train_full, Y_test = train_test_split(
+        data_X,
+        data_Y,
+        train_size=train_to_test_ratio,
+        shuffle=True,
+        random_state=None if random else 42,
+    )
+    # Split the train data into train and validation data
+    X_train, X_validation, Y_train, Y_validation = train_test_split(
+        X_train_full,
+        Y_train_full,
+        train_size=train_to_validation_ratio,
+        shuffle=True,
+        random_state=None if random else 42,
+    )
+
+    # Create the model depending on specified type
+    model_creator = {
+        ModelType.RIDGE_REGRESSION: get_regression_model,
+        ModelType.NEURAL_NET: get_neural_net_model,
+    }[ModelType[model_params['type']]]
+    print("Creating model of type: {}\n".format(model_params['type']))
+    model_params.pop('type')
+    model = model_creator(X_train, Y_train, X_validation, Y_validation, random=random, **model_params)
+
+    # Get baseline by just looking at the given average for the category
+    raw_test_data = data[data.index.isin(X_test.index)]
+    # Handle draft kings separately here
+    if prediction_stat == PredictionStat.DK_POINTS:
+        baseline = get_dk_points(
+            raw_test_data['PTSpg'],
+            raw_test_data['FG3Mpg'],
+            raw_test_data['REBpg'],
+            raw_test_data['ASTpg'],
+            raw_test_data['STLpg'],
+            raw_test_data['BLKpg'],
+            raw_test_data['TOpg'],
+        )
+        stat_name = "DK_POINTSpg"
+        if prediction_type == PredictionType.PM:
+            baseline /= raw_test_data['MINpg']
+            stat_name = "DK_POINTSpm"
+        elif prediction_type == PredictionType.PP:
+            baseline /= raw_test_data['POSSpg']
+            stat_name = "DK_POINTSpp"
+    else:
+        suffix = {
+            PredictionType.PG: 'pg',
+            PredictionType.PM: 'pm',
+            PredictionType.PP: 'pp',
+        }[prediction_type]
+        stat_name = "{}{}".format(prediction_stat.name, suffix)
+        baseline = raw_test_data[stat_name]
+    baseline = baseline.reindex(X_test.index)
+
+    # Test model
+    mae = mean_absolute_error(Y_test, model.predict(X_test))
+    baseline_average = mean_absolute_error(Y_test, baseline)
+    improvement = 100 * (baseline_average - mae) / baseline_average
+    print('\n\n{:35s}                 : {}'.format("MAE", mae))
+    print('{:35s}                 : {}'.format("Baseline from average {}".format(stat_name), baseline_average))
+    print('{:35s}                 : {} %\n\n'.format("Improvement over baseline", round(improvement, 2)))
+
+    # import IPython; IPython.embed()
+    return model, data_pipeline
 
 
 def predict_from_model(model, data_pipeline, data):

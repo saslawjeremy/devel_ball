@@ -36,7 +36,7 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
     Custom transformer to remove outliers from the dataset.
     """
 
-    def __init__(self, std_devs_for_outlier=20):
+    def __init__(self, std_devs_for_outlier=2.75):
         self.std_devs_for_outlier = std_devs_for_outlier
 
     def fit(self, X, y=None):
@@ -54,6 +54,19 @@ class OutlierRemover(BaseEstimator, TransformerMixin):
             X.loc[X[X[cat] > pos_limit].index, cat] = pos_limit
             X.loc[X[X[cat] < neg_limit].index, cat] = neg_limit
         return X
+
+
+class FloatMaker(BaseEstimator, TransformerMixin):
+    """ Make every stat a float. This should only be applied to the numerical pipeline. """
+
+    def __init__(self):
+        pass
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        return X.astype('float64')
 
 
 def get_cleanup_pipeline(data):
@@ -76,6 +89,7 @@ def get_cleanup_pipeline(data):
         ('negative_value_remover', NegativeValueRemover()),
         ('outlier_remover', OutlierRemover()),
         ('min_max_scalar', MinMaxScaler()),
+        ('float_maker', FloatMaker()),
     ])
     full_pipeline = ColumnTransformer([
         ('num', num_pipeline, num_attribs),
