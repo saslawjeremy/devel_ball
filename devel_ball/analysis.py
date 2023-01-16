@@ -6,17 +6,6 @@ from enum import Enum
 from copy import deepcopy
 import itertools
 
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import (
-    OrdinalEncoder,
-    MinMaxScaler,
-    PolynomialFeatures,
-)
-from sklearn.base import (
-    BaseEstimator,
-    TransformerMixin,
-)
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import (
     LinearRegression,
@@ -33,129 +22,115 @@ from keras.callbacks import EarlyStopping
 
 from devel_ball.models import Player
 from devel_ball.post_process import get_dk_points
+from devel_ball.data_transformers import get_cleanup_pipeline
+
+
+############################################ PARAMATERS ############################################
+
+PARAMS = {
+
+    # Type of predictions to make
+    'prediction_stat': 'PTS',
+    'prediction_type': 'PM',
+
+    # List of categories used for predictions
+    'prediction_categories': [
+        "DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS",
+        "PTS", "REB", "AST", "STL", "BLK", "FG3M", "TO"
+    ],
+
+    # The ratio of train/test data
+    'train_to_test_ratio': 0.85,
+
+    # Whether or not to make the machine learning random or be seeded for deterministic results
+    'random': False,
+
+    # Parameters of the specific machine learning model
+    'model': {
+        'type': 'RIDGE_REGRESSION',
+    }
+    """
+    'model': {
+        'type': 'NEURAL_NET',
+        'scan': False,
+        'train_to_valid_ratio': 0.85,
+    }
+    """
+
+}
+
+####################################################################################################
+
+
+class PredictionStat(Enum):
+    DK_POINTS = 1
+    MIN = 2
+    POSS = 3
+    PTS = 4
+    REB = 5
+    AST = 6
+    FG3M = 7
+    BLK = 8
+    STL = 9
+    TO = 10
 
 
 class PredictionType(Enum):
-    DKPG = 1 # Draftkings points per game
-    DKPM = 2 # Draftkings points per minute
-    DKPP = 3 # Draftkings points per possession
-    PTS = 4  # Points
+    PG = 1  # per game
+    PM = 2  # per minute
+    PP = 3  # per possession
 
 
-class NegativeValueRemover(BaseEstimator, TransformerMixin):
+class ModelType(Enum):
+    RIDGE_REGRESSION = 1
+    NEURAL_NET = 2
+
+
+def get_categories(data):
     """
-    Custom transformer to remove negative values from the features that are now allowed
-    to have them.
+    Extract the categories from the dataset.
+
+    :returns:
+        per game cateogires,
+        per minute categories,
+        per possession categories,
+        recent categories,
+        accounting categories,
     """
-
-    def __init__(self, exclude_features=
-            ['PLUS_MINUSpg', 'PLUS_MINUSpm', 'PLUS_MINUSpp', 'PER', 'GAME_SCORE', 'PIE',
-             'PLUS_MINUStm', 'PLUS_MINUSvsTm']):
-        self.exclude_features = exclude_features
-
-    def fit(self, X, y=None):
-        return self
-
-    def transform(self, X):
-
-        for cat in X:
-            if cat not in self.exclude_features:
-                X.loc[X[X[cat]<0.0][cat].index, cat] = 0
-        return X
-
-
-class OutlierRemover(BaseEstimator, TransformerMixin):
-    """
-    Custom transformer to remove outliers from the dataset.
-    """
-
-    def __init__(self, std_devs_for_outlier=20):
-        self.std_devs_for_outlier = std_devs_for_outlier
-
-    def fit(self, X, y=None):
-        self._means = {}
-        self._std_devs = {}
-        for cat in list(X):
-            self._means[cat] = X[cat].mean()
-            self._std_devs[cat] = X[cat].std()
-        return self
-
-    def transform(self, X):
-        for cat in list(X):
-            pos_limit = self._means[cat] + self.std_devs_for_outlier * self._std_devs[cat]
-            neg_limit = self._means[cat] - self.std_devs_for_outlier * self._std_devs[cat]
-            X.loc[X[X[cat] > pos_limit].index, cat] = pos_limit
-            X.loc[X[X[cat] < neg_limit].index, cat] = neg_limit
-        return X
-
-
-def get_cleanup_pipeline(data):
-    """
-    Get the full pipeline to pass training data through to normalize/clean it.
-
-    The current steps are:
-        1) Remove negative values from categories that cannot have negative values with NegativeValueRemover
-        2) Snip outliers to the boundaries with OutlierRemover
-        3) Scale features to a 0 - 1 range with MinMaxScaler
-        4) Turn category attributes into numerical attribuets with OrdinalEncoder
-    """
-
-    # Remove cat attributes
-    num_attribs = list(data)
-    num_attribs.remove('HOME')
-    cat_attribs = ['HOME']
-
-    num_pipeline = Pipeline([
-        ('negative_value_remover', NegativeValueRemover()),
-        ('outlier_remover', OutlierRemover()),
-        ('min_max_scalar', MinMaxScaler()),
-    ])
-    full_pipeline = ColumnTransformer([
-        ('num', num_pipeline, num_attribs),
-        ('cat', OrdinalEncoder(), cat_attribs),
-    ])
-    return full_pipeline
-
-
-def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, train=True):
-    """
-    TODO: docx
-    """
-
-    # Remove non-players that we don't want to predict based on. If train, assume we know
-    # not to predict players who didn't play in the game
-    data = data[data['MINpg'] > 10.]
-    if train:
-        data = data[data['MIN'] > 0.0]
-
-    ### TODO (JS): Testing adding dk points as a predictive feature here ###
-    DK_POINTSpg = get_dk_points(
-        data['PTSpg'],
-        data['FG3Mpg'],
-        data['REBpg'],
-        data['ASTpg'],
-        data['STLpg'],
-        data['BLKpg'],
-        data['TOpg'],
-    )
-    #data['DK_POINTSpg'] = DK_POINTSpg
-    ###
-
-    # Create lists of relevant categories
     pg_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pg'] # per-game
     pm_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pm'] # per-minute
     pp_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pp'] # per-possession
     rec_cats = [cat for cat in list(data.columns) if cat[:6] == 'RECENT'] # recent-cats
+    accounting_cats = ['PLAYER_ID', 'DATE']
+    return pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats
 
-    # List of categories used for predictions
-    predictions = ["DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS", 'PTS', 'REB', 'AST', 'STL', 'BLK', 'FG3M', 'TO']
 
-    # Cleanup the recent categories where data may be missing
+def cleanup_recent_cats(data, rec_cats, prediction_type):
+    """
+    Cleanup the recent categories, where data may be missing (like if you've only played 2 games so far,
+    yet we track for up to 10 games.
+
+    For now, the strategy is to propogate the same recent number backwards for the rest of untracked games.
+    So if you've only played 1 game before and you had 10 PTS, then the previous "9" games before this would
+    be marked as 10 PTS as well.
+
+    Also, update the recent categories for the specified prediction type. For example if the
+    prediction type is per minute, then update the recent categories to be recent per minute stats,
+    i.e. points per minute.
+
+    :param data: The input data to cleanup
+    :param rec_cats: the recent categories in the dataset
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    """
+
+    # Figure out all the unique recent categories, and how far back they go in "lag" of games
     unique_recent_cats = set([c[:-1] for c in rec_cats])
     random_recent_cat = list(unique_recent_cats)[0]
     max_lag = max(
         int(c[len(random_recent_cat):]) for c in rec_cats if random_recent_cat in c
     )
+
+    # Update the recent stats that are not filled out
     for rec_cat in unique_recent_cats:
         for i in range(1, max_lag + 1):
             data['{}{}'.format(rec_cat, i)] = (
@@ -165,46 +140,180 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
                     data['{}{}'.format(rec_cat, i)]
                 )
             )
-        # Try adding different recent averages (last 3 games, 5 games, 10 games, etc.)
-        #data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
-    # TODO (JS): try cleaning up recent stats with averages, max/min, etc.
+
+    # Update the recent categories for the given prediction type if per minute or per possession.
+    cats_to_update = unique_recent_cats
+    if prediction_type == PredictionType.PG:
+        return
+    elif prediction_type == PredictionType.PM:
+        divisor_cat = 'RECENT_MIN'
+        suffix = 'pm'
+        # If predicting based on per minute stats, don't update the recent minutes category
+        cats_to_update.remove('RECENT_MIN')
+    elif prediction_type == PredictionType.PP:
+        divisor_cat = 'RECENT_POSS'
+        suffix = 'pp'
+        # If predicting based on per possession stats, don't update the recent possessions category
+        cats_to_update.remove('RECENT_POSS')
+    else:
+        raise Exception("Invalid specified PredictionType: {}".format(prediction_type))
+
+    for rec_cat in cats_to_update:
+        for i in range(max_lag + 1):
+            new_cat = (
+                data['{}{}'.format(rec_cat, i)].astype('float64')
+                    / data['{}{}'.format(divisor_cat, i)].astype('float64')
+            ).replace((np.inf, -np.inf, np.nan), (0.0, 0.0, 0.0))
+            # Add the new category
+            data['{}{}{}'.format(rec_cat, i, suffix)] = new_cat
+            # Remove the old category
+            data.pop('{}{}'.format(rec_cat, i))
+
+    return data
 
 
-    # Create dataframes pertaining to which type of data to predict from
-    DKPG_data = data.copy(deep=True) # draftkings points per game prediction
-    for cat in pm_cats + pp_cats:
-        DKPG_data.pop(cat)
-    DKPM_data = data.copy(deep=True) # draftkings points per minute prediction
-    # Need to create recent per_min and per_poss stats to use below
-    for cat in pg_cats + pp_cats + rec_cats:
-        DKPM_data.pop(cat)
-    DKPP_data = data.copy(deep=True) # draftkings points per possession prediction
-    for cat in pg_cats + pm_cats + rec_cats:
-        DKPP_data.pop(cat)
+def filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats, rec_cats):
+    """
+    Take the data, and filter is based on the specified prediction type. This removes the irrelevant
+    categories, for example if predicting per game, remove the per minute and per possession stats
 
-    # Select the right dataframe based on prediction type
-    data = {
-        PredictionType.DKPG: DKPG_data,
-        PredictionType.DKPM: DKPM_data,
-        PredictionType.DKPP: DKPP_data,
-        PredictionType.PTS: DKPG_data,
+    :param data: The input data to cleanup
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    :param pg_cats: the per game categories in the dataset
+    :param pm_cats: the per minute categories in the dataset
+    :param pp_cats: the per possession categories in the dataset
+    :param rec_cats: the recent categories in the dataset
+    """
+
+    # Remove categories that don't matter based on prediction type
+    remove_cats = {
+        PredictionType.PG: pm_cats + pp_cats,
+        PredictionType.PM: pg_cats + pp_cats,
+        PredictionType.PP: pg_cats + pm_cats,
     }[prediction_type]
+    for cat in remove_cats:
+        data.pop(cat)
 
-    # Separate prediction data from results data
-    data_X = data.drop(predictions, axis=1)
-    data_Y = data[predictions].copy()
-    predict = {
-        PredictionType.DKPG: 'DK_POINTS',
-        PredictionType.DKPM: 'DK_POINTS_PER_MIN',
-        PredictionType.DKPP: 'DK_POINTS_PER_POSS',
-        PredictionType.PTS: 'PTS',
-    }[prediction_type]
-    data_Y = data_Y[predict].astype('float64')
+    return data
 
-    # Store accounting data
-    accounting_cats = ['PLAYER_ID', 'DATE']
-    data_accounting = data_X[accounting_cats].copy()
-    data_X = data_X.drop(accounting_cats, axis=1)
+
+def filter_data_for_accounting_data(data, accounting_cats):
+    """
+    Filter the accounting cats out of the data, and then return it as a new dataset.
+
+    :param data: The input data to cleanup
+    :param account_cats: the accounting categories
+    """
+    data_accounting = data[accounting_cats].copy()
+    data = data.drop(accounting_cats, axis=1)
+    return data, data_accounting
+
+
+def add_features(data, prediction_stat, prediction_type):
+    """
+    Add any new features to the model for predictions.
+
+    :param data: The input data to cleanup
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    """
+    # If predicting draftkings, add draftkings points per game
+    if prediction_stat == PredictionStat.DK_POINTS:
+        DK_POINTSpg = get_dk_points(
+            data['PTSpg'],
+            data['FG3Mpg'],
+            data['REBpg'],
+            data['ASTpg'],
+            data['STLpg'],
+            data['BLKpg'],
+            data['TOpg'],
+        )
+        data['DK_POINTSpg'] = DK_POINTSpg
+
+    # TODO(JS): Try different categories for recent categories, like average last 3, 5, etc. Max/min. Weighted
+    # averages, etc.
+    # data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
+
+    # TODO (JS): Try "game stats", like averaging or adding both teams for metrics on the game's expectation
+    # of like total points, total rebounds, advanced stats too, etc.
+
+    return data
+
+
+def separate_predict_and_results_data(data, prediction_stat, prediction_type, prediction_cats):
+    """
+    Take the full data set, and separate it into data to use to predict with, and the results
+    data that is what can be checked against.
+
+    :param data: The input data to cleanup
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    :param prediction_cats: The categories that can be predicted, representing the results
+
+    :returns: the data that can be used to predict, and the data that can be predicted
+    """
+
+    # Separate based on prediction categories
+    data_X = data.drop(prediction_cats, axis=1)
+
+    # Figure out the categories to keep
+    if prediction_type == PredictionType.PG:
+        data_Y = data[[prediction_stat.name]].astype('float64')
+    elif prediction_type == PredictionType.PM:
+        data_Y = data[['MIN']].astype('float64')
+        data_Y['{}pm'.format(prediction_stat.name)] = (
+            data[prediction_stat.name].astype('float64') / data['MIN'].astype('float64')
+        ).replace((np.inf, -np.inf, np.nan), (0.0, 0.0, 0.0))
+    elif prediction_type == PredictionType.PP:
+        data_Y = data[['POSS']].astype('float64')
+        data_Y['{}pp'.format(prediction_stat.name)] = (
+            data[prediction_stat.name].astype('float64') / data['POSS'].astype('float64')
+        ).replace((np.inf, -np.inf, np.nan), (0.0, 0.0, 0.0))
+    else:
+        raise Exception("Invalid specified PredictionType: {}".format(prediction_type))
+
+    return data_X, data_Y.astype('float64')
+
+
+def cleanup_data(data, prediction_stat, prediction_type, prediction_cats, data_pipeline=None, train=True):
+    """
+    Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
+
+    :param data: The input data to cleanup
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    :param prediction_cats: The categories that could possibly be predicted
+    :param data_pipline: If provided, use this as the data cleanup pipeline, if not provided, then
+        create the data cleanup pieline
+    :param bool train: Whether or not this is a part of training
+    :returns: data_X, data_Y, data_accounting, data_pipeline
+    """
+
+    # Always remove players who play under 10 MPG, whether training or predicting. For training, we'll
+    # also remove players who didn't play in the game, and assume we would have known that someone who
+    # isn't playing (likely injured) wouldn't have played anyways.
+    data = data[data['MINpg'] > 10.]
+    if train:
+        data = data[data['MIN'] > 0.0]
+
+    # Separate the categories into their given types
+    pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats = get_categories(data)
+
+    # Cleanup the recent categories where data may be missing, and update for specified prediction_type
+    data = cleanup_recent_cats(data, rec_cats, prediction_type)
+
+    # Filter the data
+    data = filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats, rec_cats)
+    data, data_accounting = filter_data_for_accounting_data(data, accounting_cats)
+
+    # Add new features to potentially make use of
+    data = add_features(data, prediction_stat, prediction_type)
+
+    # Separate prediction data from results data, and match the results data to the desired prediction
+    # stat and type
+    data_X, data_Y = separate_predict_and_results_data(
+        data, prediction_stat, prediction_type, prediction_cats,
+    )
 
     # Get the pipeline and clean the data
     if data_pipeline is None:
@@ -219,46 +328,86 @@ def cleanup_data(data, data_pipeline=None, prediction_type=PredictionType.DKPG, 
     return data_X_prepared, data_Y, data_accounting, data_pipeline
 
 
-    ### TEMP - LEFTOVER NOTES FROM TESTING RECENCY DATA ON MINS IT SEEMS ###
-    # Create 3D tensor
-    #tensor = []
-    #for i, row in REC_data.iterrows():
-    #    d = np.zeros((10, 1))
-    #    for index in range(10):
-    #        d[index][0] = row['RECENT_MIN{}'.format(index)]
-    #    tensor.append(d)
-    #X = np.asarray(tensor)
-    #Y = REC_data['MIN']
-    ## Create model
-    #model = Sequential()
-    #model.add(LSTM(128, input_shape=((10, 1))))
-    #model.add(Dense(1))
-    #model.compile(optimizer='RMSprop', loss='mean_absolute_error')
-    #earlystop = EarlyStopping(monitor="loss", min_delta=0, patience=5)
-    #model.fit(X, Y, batch_size=32, epochs=10, callbacks=[earlystop])
-    #####################################################################
+def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
+    """
+    Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
+    predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
+    predictiong PTS, and data_Y would be filtered to only PTS.
+
+    :param data_X: the prediction data
+    :param data_Y: the results data
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    """
+
+    # Make data_Y only have the prediction_stat, and remove any denominator data like MIN or POSS
+    suffix = {
+        PredictionType.PG: 'pg',
+        PredictionType.PM: 'pm',
+        PredictionType.PP: 'pp',
+    }[prediction_type]
+    data_Y = data_Y[["{}{}".format(prediction_stat.name, suffix)]]
+
+    # If prediction PM or PP, then filter out the recent MIN or POSS data that was stored but not used
+    # as a part of the machine learning model.
+    remove_cats = []
+    if prediction_type == PredictionType.PM:
+        remove_cats.extend(c for c in data_X.columns if 'RECENT_MIN' in c)
+    elif prediction_type == PredictionType.PP:
+        remove_cats.extend(c for c in data_X.columns if 'RECENT_POSS' in c)
+    for remove_cat in remove_cats:
+        data_X.pop(remove_cat)
+
+    return data_X, data_Y
 
 
 def get_model(data):
 
-    # Get data
-    prediction_type = PredictionType.PTS
+    # Pull the "parameters"
+    prediction_stat = PredictionStat[PARAMS['prediction_stat']]
+    prediction_type = PredictionType[PARAMS['prediction_type']]
+    prediction_cats = PARAMS['prediction_categories']
+    train_to_test_ratio = PARAMS['train_to_test_ratio']
+    random = PARAMS['random']
+    model_params = PARAMS['model']
+
+    # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
+    # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
+    # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
     data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
-        data, prediction_type=prediction_type, train=True
-    )
-    X_train_full, X_test, Y_train_full, Y_test = train_test_split(
-        data_X, data_Y, train_size=0.85,
-        shuffle=False, random_state=42,  # Uncomment for deterministic testing
-    )
-    X_train, X_valid, Y_train, Y_valid = train_test_split(
-        X_train_full, Y_train_full, train_size=0.70/0.85,
-        shuffle=False, random_state=42,  # Uncomment for deterministic testing
+        data,
+        prediction_stat=prediction_stat,
+        prediction_type=prediction_type,
+        prediction_cats=prediction_cats,
+        train=True,
     )
 
-    # Create model
-    # model = get_regression_model(X_train_full, Y_train_full)
-    model = get_neural_net_model(X_train, Y_train, X_valid, Y_valid, scan=False)
+    # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
+    # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
+    # predictiong PTS, and data_Y would be filtered to only PTS.
+    data_X, data_Y = filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type)
+
+    # Split data into train and test data
+    X_train, X_test, Y_train, Y_test = train_test_split(
+        data_X, data_Y, train_size=train_to_test_ratio,
+        shuffle=random, random_state=None if random else 42,
+    )
+
+    # Create the model depending on specified type
+    model_creator = {
+        ModelType.RIDGE_REGRESSION: get_regression_model,
+        ModelType.NEURAL_NET: get_neural_net_model,
+    }[ModelType[model_params['type']]]
+    print("Creating model of type: {}\n\n".format(model_params['type']))
+    model_params.pop('type')
+    model = model_creator(X_train, Y_train, random=random, **model_params)
     print_model(model)
+
+
+    import IPython; IPython.embed()
+
+
+    # Create model
 
     # Get baseline by just looking at average dk points
     raw_test_data = data[data.index.isin(X_test.index)]
@@ -276,7 +425,7 @@ def get_model(data):
         raw_test_data[f'TOp{letter}'],
     )
     """
-    baseline = raw_test_data.PTSpg
+    baseline = raw_test_data.PTSpm
     baseline = baseline.reindex(X_test.index)
 
     # Test model
@@ -291,7 +440,7 @@ def get_model(data):
     return model, data_pipeline
 
 
-def get_regression_model(X, Y, eliminate_keys=False, improvement_percent_gate=0.005):
+def get_regression_model(X, Y, random, eliminate_keys=False, improvement_percent_gate=0.005):
 
     #from xgboost import XGBRegressor
     #model = XGBRegressor(objective="reg:squarederror", n_estimators=500)
@@ -356,7 +505,13 @@ def print_model(model):
         print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
 
 
-def get_neural_net_model(X_train, Y_train, X_valid, Y_valid, scan=True):
+def get_neural_net_model(X_train, Y_train, random, train_to_valid_ratio=0.85, scan=False):
+
+    X_train, X_valid, Y_train, Y_valid = train_test_split(
+        X_train_full, Y_train_full, train_size=train_to_valid_ratio,
+        shuffle=random, random_state=None if random else 42,
+    )
+
     if scan:
         return _get_scanned_neural_net_model(X_train, Y_train, X_valid, Y_valid)
     else:

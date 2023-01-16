@@ -4,6 +4,7 @@ from time import sleep
 import numpy as np
 import pandas as pd
 from json import JSONDecodeError
+from requests.exceptions import ConnectionError
 
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
@@ -50,7 +51,7 @@ def query_nba_api(endpoint, sleep_time=1.5, fail_sleep_time=30, quiet=False, all
     while True:
         try:
             return endpoint(**kwargs)
-        except JSONDecodeError as e:
+        except (ConnectionError, JSONDecodeError) as e:
             if allow_error:
                 raise e
             print("    -- Timed out, retrying! --")

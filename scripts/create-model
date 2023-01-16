@@ -22,7 +22,7 @@ if __name__ == '__main__':
     if args.name[-2:] != '.p':
         raise Exception("Filename must end in '.p'")
 
-    # Combine all passed inyears
+    # Combine all passed in years
     data = pd.read_pickle("{}/train/{}.p".format(os.environ.get("DEVEL_BALL_DATA_PATH"), args.years[0]))
     for year in args.years[1:]:
         data = data.append(
