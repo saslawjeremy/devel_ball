@@ -33,6 +33,10 @@ PARAMS = {
     'prediction_stat': 'PTS',
     'prediction_type': 'PM',
 
+    # Thresholds to include players in the data
+    'min_MPG': 15.,
+    'min_games_played': 5,
+
     # List of categories used for predictions
     'prediction_categories': [
         "DK_POINTS", "MIN", "POSS", "DK_POINTS_PER_MIN", "DK_POINTS_PER_POSS",
@@ -50,7 +54,7 @@ PARAMS = {
     # Parameters of the specific machine learning model
     'model': {
         'type': 'RIDGE_REGRESSION',
-        'eliminate_keys': True,
+        'eliminate_keys': False,
         'improvement_percent_gate': 0.005,
     },
 
@@ -142,6 +146,18 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
                     data['{}{}'.format(rec_cat, i)]
                 )
             )
+
+
+    # TODO (JS): try new stats like weighted avs
+    # TODO (JS): fill in missing 0s for injury stuffsi
+
+    # TODO (JS): integrate with section below, which order?
+
+    for recent_cat in unique_recent_cats:
+        data['{}_weighted_average'.format(recent_cat)] = sum(
+            data['{}{}'.format(recent_cat, i)] for i in range(max_lag + 1)
+        ) / sum(i for i in range(max_lag + 1))
+
 
     # Update the recent categories for the given prediction type if per minute or per possession.
     cats_to_update = unique_recent_cats
@@ -288,7 +304,16 @@ def add_features(data, prediction_stat, prediction_type):
     return data
 
 
-def cleanup_data(data, prediction_stat, prediction_type, prediction_cats, data_pipeline=None, train=True):
+def cleanup_data(
+    data,
+    prediction_stat,
+    prediction_type,
+    prediction_cats,
+    data_pipeline=None,
+    train=True,
+    min_MPG=15.,
+    min_games_played=5,
+):
     """
     Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
 
@@ -299,14 +324,27 @@ def cleanup_data(data, prediction_stat, prediction_type, prediction_cats, data_p
     :param data_pipline: If provided, use this as the data cleanup pipeline, if not provided, then
         create the data cleanup pieline
     :param bool train: Whether or not this is a part of training
+    :param min_MPG: the minimum MPG to include a player in the data
+    :param min_games_played: the minimum games played thus far this year to include the player in the data
+
     :returns: data_X, data_Y, data_accounting, data_pipeline
     """
 
-    # Always remove players who play under 10 MPG, whether training or predicting. For training, we'll
-    # also remove players who didn't play in the game, and assume we would have known that someone who
-    # isn't playing (likely injured) wouldn't have played anyways.
-    data = data[data['MINpg'] > 10.]
+    # Filter out players who haven't played the adequate amount of minute of games
+    data = data[data['MINpg'] >=  min_MPG]
+    try:
+        data = data[data['RECENT_PTS{}'.format(min_games_played-1)].notnull()]
+    except KeyError:
+        # The min number of games played exceeds the amount we track, invalid state
+        print(
+            "The min_games_played of {} is more than the amount we track, this should be lowered."
+            .format(min_games_played)
+        )
+
     if train:
+        # For training, we'll also remove players who didn't play in the game, and assume we would have known
+        # that someone who isn't playing (likely injured) wouldn't have played anyways. Also, let's exclude
+        # players who haven't played 5 games yet this season.
         data = data[data['MIN'] > 0.0]
 
     # Separate the categories into their given types
@@ -530,6 +568,8 @@ def get_neural_net_model(
 def get_model(data):
 
     # Pull the "parameters"
+    min_MPG = PARAMS['min_MPG']
+    min_games_played = PARAMS['min_games_played']
     prediction_stat = PredictionStat[PARAMS['prediction_stat']]
     prediction_type = PredictionType[PARAMS['prediction_type']]
     prediction_cats = PARAMS['prediction_categories']
@@ -547,6 +587,8 @@ def get_model(data):
         prediction_type=prediction_type,
         prediction_cats=prediction_cats,
         train=True,
+        min_MPG=min_MPG,
+        min_games_played=min_games_played,
     )
 
     # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
@@ -562,6 +604,7 @@ def get_model(data):
         shuffle=True,
         random_state=None if random else 42,
     )
+
     # Split the train data into train and validation data
     X_train, X_validation, Y_train, Y_validation = train_test_split(
         X_train_full,
