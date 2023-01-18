@@ -178,32 +178,31 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     # pm predictions, or RECENT_POSS for pp predictions
     weighted_average_cats = deepcopy(unique_recent_cats)
     suffix = ''
+    check_for_playing_category = 'MIN'
     if prediction_type == PredictionType.PM:
         weighted_average_cats.remove('RECENT_MIN')
         suffix = 'pm'
+        check_for_playing_category = 'MIN'
     elif prediction_type == PredictionType.PP:
         weighted_average_cats.remove('RECENT_POSS')
         suffix = 'pp'
+        check_for_playing_category = 'POSS'
 
-    """
-    for recent_cat in weighted_average_cats:
-        data['{}{}_weighted_average'.format(recent_cat, suffix)] = sum(
-            data['{}{}{}'.format(recent_cat, i, suffix)] * (max_lag + 1 - i) for i in range(max_lag + 1)
-        ) / sum(i for i in range(max_lag + 2))
-        for i in range(max_lag+1):
-            data.pop('{}{}{}'.format(recent_cat, i, suffix))
-    """
-
-    # TODO (JS): Try to fill in missing recency data for games a player didn't play
+    # When creating the new weighted averages, consider that a player may miss games. Rather than giving him
+    # a "0" for this value, we fill in the gaps by just not considering the missed game as a part of the weighted
+    # average calculation
     for data_index, row in data.iterrows():
         for recent_cat in weighted_average_cats:
             numerator = denominator = 0
             for i in range(max_lag+1):
-                if row['RECENT_MIN{}'.format(i)] > 0.0:
+                if row['RECENT_{}{}'.format(check_for_playing_category, i)] > 0.0:
                     numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (max_lag + 1 - i)
                     denominator += (max_lag + 1 - i)
             data.at[data_index, '{}{}_weighted_average'.format(recent_cat, suffix)] = numerator/denominator
-
+    # Remove the old raw recent stats that are of no interest now that the weighted average exists
+    for recent_cat in weighted_average_cats:
+        for i in range(max_lag+1):
+            data.pop('{}{}{}'.format(recent_cat, i, suffix))
 
     return data
 
@@ -313,11 +312,6 @@ def add_features(data, prediction_stat, prediction_type):
             data['{}{}'.format(team_stat_category, 'tm')] + data['{}{}'.format(team_stat_category, 'vsTm')]
         ) / 2.0
         data['{}{}'.format(team_stat_category, 'gm')] = game_stat
-
-    # TODO(JS): Try different categories for recent categories, like average last 3, 5, etc. Max/min. Weighted
-    # averages, etc.
-    # data[f'{rec_cat}_last_3_average'] = (data[f'{rec_cat}0'] + data[f'{rec_cat}1'] + data[f'{rec_cat}2']) / 3.
-    # TODO (JS): Ignore recent MIN/POSS for pm/pp
 
     return data
 
@@ -434,18 +428,89 @@ def get_regression_model(
     X_train, Y_train, X_validation, Y_validation, random, eliminate_keys=False, improvement_percent_gate=0.005
 ):
 
+    # Because this model explicitly uses direct training, or cross validation which handles train/validation
+    # splitting, we might as well use all the data we have available
+    X_train = X_train.append(X_validation)
+    X_train = X_train.reset_index()
+    X_train = X_train.drop('index', axis=1)
+    Y_train = Y_train.append(Y_validation)
+    Y_train = Y_train.reset_index()
+    Y_train = Y_train.drop('index', axis=1)
+
     def print_model(model):
         sorted_coef = sorted(enumerate(model.coef_[0]), key=lambda vals: np.abs(vals[1]), reverse=True)
         for feature_i, coef in sorted_coef:
-            print('  {:20s} {}'.format(model.feature_names_in_[feature_i], coef))
+            print('  {:35s} {}'.format(model.feature_names_in_[feature_i], round(coef, 6)))
 
     ridge_reg = Ridge()
     ridge_reg.fit(X_train, Y_train)
     if not eliminate_keys:
-        # TODO (JS): If we're not doing any validation, we might as well use all the data (train + validation)
         print("\nModel description:")
         print_model(ridge_reg)
         return ridge_reg
+
+    ### TODO (JS): test better elimination of keys ###
+    # TODO (JS): probably want to make this an enum of like type "ALL", "ADD_KEYS", "REMOVE_KEYS". probably something
+    # worth being able to test/iterate on differently for different stats/pg/pm/pp
+
+    final_keys = set(X_train.keys())
+    final_score = -np.mean(
+        cross_val_score(ridge_reg, X_train, Y_train, scoring="neg_mean_absolute_error", cv=10)
+    )
+    final_test_ridge_reg = Ridge()
+    print("\nIteratively removing keys to improve the model. Starting score: {}".format(final_score))
+    while True:
+
+        # TODO (JS): this is for testing:
+        print("total keys remaining: {}".format(len(final_keys)))
+
+        # Look for the next best key to remove
+        best_score = np.inf
+        best_key_to_remove = None
+        test_ridge_reg = Ridge()
+        # Consider all keys still existing in final keys:
+        for key_to_test in final_keys:
+            keys = [key for key in final_keys if key != key_to_test]
+            score = -np.mean(
+                cross_val_score(
+                    test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
+                )
+            )
+            if score < best_score:
+                best_score = score
+                best_key_to_remove = key_to_test
+        # If new result is better than the previously found best result, update
+        # TODO (JS): figure out if improvement gate makes sense here, may need tuning
+        if best_score < final_score:
+            final_score = best_score
+            final_keys.remove(best_key_to_remove)
+            final_test_ridge_reg.fit(X_train[final_keys], Y_train)
+            # TODO (JS): format this print
+            print("\nIntermediate state, removed: {}, score: {}:".format(best_key_to_remove, final_score))
+        # Else we are no longer improving, and stop iterating
+        else:
+            break
+
+    # TODO (JS): de-dupe this logic in both methods of doing key removal/addition
+    # Remove the keys that are found to not be used
+    import IPython; IPython.embed()
+    for key_i, key in enumerate(X_train.keys()):
+        # If key isn't used, set it to 0.0
+        if key not in final_keys:
+            ridge_reg.coef_[0][key_i] = 0.0
+        # Else key is used, set the coefficient based on the model with the proper keys
+        else:
+            ridge_reg.coef_[0][key_i] = final_test_ridge_reg.coef_[0][list(final_keys).index(key)]
+    ridge_reg.intercept_ = final_test_ridge_reg.intercept_
+
+    print("\nFinal Model description:")
+    print_model(ridge_reg)
+
+    return ridge_reg
+
+
+
+    ###################################################
 
     # Iterate until the best final combination of keys is found
     print("\nIteratively adding keys to improve the model.")
@@ -460,10 +525,11 @@ def get_regression_model(
         # Consider all keys not already in final_keys
         for key in list(set(X_train.keys()) - set(final_keys)):
             keys = final_keys + [key]
-            scores = cross_val_score(
-                test_ridge_reg, X_validation[keys], Y_validation, scoring="neg_mean_absolute_error", cv=10
+            score = -np.mean(
+                cross_val_score(
+                    test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
+                )
             )
-            score = -np.mean(scores)
             if score < best_score:
                 best_score = score
                 best_key = key
@@ -608,6 +674,52 @@ def get_model(data):
         min_MPG=min_MPG,
         min_games_played=min_games_played,
     )
+
+    """
+    data_X = data_X[[
+        'PTSpm',
+        'AST_TOVgm',
+        'RECENT_PTSpm_weighted_average',
+        'PER',
+        'PIEgm',
+        'DREBpm',
+        'TOvsTm',
+        'FG3Mpm',
+        'REB_PCT',
+        'TOpm',
+        'FG3Apm',
+        'TS_PCT',
+        'BLKgm',
+        'PIEtm',
+        'PIE',
+        'TOtm',
+        'AST_PCTvsTm',
+        'PACEtm',
+        'AST_TOV',
+        'BLKtm',
+        'RECENT_USG_PCTpm_weighted_average',
+        'GAME_SCORE',
+        'AST_PCTtm',
+        'BLKvsTm',
+        'POSStm',
+        'OREBpm',
+        'RECENT_TOpm_weighted_average',
+        'PTStm',
+        'RECENT_ASTpm_weighted_average',
+        'PLUS_MINUSpm',
+        'AST_PCT',
+        'STLtm',
+        'BLKpm',
+        'PFtm',
+        'FTP',
+        'FG3Ptm',
+        'FTPtm',
+        'FTPvsTm',
+        'DEF_RTG',
+        'DREBvsTm',
+        'HOME',
+    ]]
+    """
 
     # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
     # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
