@@ -116,9 +116,9 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     Cleanup the recent categories, where data may be missing (like if you've only played 2 games so far,
     yet we track for up to 10 games.
 
-    For now, the strategy is to propogate the same recent number backwards for the rest of untracked games.
-    So if you've only played 1 game before and you had 10 PTS, then the previous "9" games before this would
-    be marked as 10 PTS as well.
+    This is handled by averaging the recent game data that we do have, and applying this backwards for
+    the rest of the untracked games. So if you've only played 2 games and you had 10 and 20 PTS, then
+    the previous 8 games before this would be marked as 15 PTS.
 
     Also, update the recent categories for the specified prediction type. For example if the
     prediction type is per minute, then update the recent categories to be recent per minute stats,
@@ -136,33 +136,21 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
         int(c[len(random_recent_cat):]) for c in rec_cats if random_recent_cat in c
     )
 
-    # Update the recent stats that are not filled out
+    # Update the recent stats that are not filled out with the average up until that point
     for rec_cat in unique_recent_cats:
         for i in range(1, max_lag + 1):
             data['{}{}'.format(rec_cat, i)] = (
                 np.where(
                     data['{}{}'.format(rec_cat, i)].isnull(),
-                    data['{}{}'.format(rec_cat, i-1)],
-                    data['{}{}'.format(rec_cat, i)]
+                    sum(data['{}{}'.format(rec_cat, j)] for j in range(i))/i,
+                    data['{}{}'.format(rec_cat, i)],
                 )
             )
 
-
-    # TODO (JS): try new stats like weighted avs
-    # TODO (JS): fill in missing 0s for injury stuffsi
-
-    # TODO (JS): integrate with section below, which order?
-
-    for recent_cat in unique_recent_cats:
-        data['{}_weighted_average'.format(recent_cat)] = sum(
-            data['{}{}'.format(recent_cat, i)] for i in range(max_lag + 1)
-        ) / sum(i for i in range(max_lag + 1))
-
-
     # Update the recent categories for the given prediction type if per minute or per possession.
-    cats_to_update = unique_recent_cats
+    cats_to_update = deepcopy(unique_recent_cats)
     if prediction_type == PredictionType.PG:
-        return data
+        cats_to_update = []
     elif prediction_type == PredictionType.PM:
         divisor_cat = 'RECENT_MIN'
         suffix = 'pm'
@@ -175,7 +163,6 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
         cats_to_update.remove('RECENT_POSS')
     else:
         raise Exception("Invalid specified PredictionType: {}".format(prediction_type))
-
     for rec_cat in cats_to_update:
         for i in range(max_lag + 1):
             new_cat = (
@@ -186,6 +173,37 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
             data['{}{}{}'.format(rec_cat, i, suffix)] = new_cat
             # Remove the old category
             data.pop('{}{}'.format(rec_cat, i))
+
+    # Replace the raw recent data with weighted averages, don't update RECENT_MIN though for
+    # pm predictions, or RECENT_POSS for pp predictions
+    weighted_average_cats = deepcopy(unique_recent_cats)
+    suffix = ''
+    if prediction_type == PredictionType.PM:
+        weighted_average_cats.remove('RECENT_MIN')
+        suffix = 'pm'
+    elif prediction_type == PredictionType.PP:
+        weighted_average_cats.remove('RECENT_POSS')
+        suffix = 'pp'
+
+    """
+    for recent_cat in weighted_average_cats:
+        data['{}{}_weighted_average'.format(recent_cat, suffix)] = sum(
+            data['{}{}{}'.format(recent_cat, i, suffix)] * (max_lag + 1 - i) for i in range(max_lag + 1)
+        ) / sum(i for i in range(max_lag + 2))
+        for i in range(max_lag+1):
+            data.pop('{}{}{}'.format(recent_cat, i, suffix))
+    """
+
+    # TODO (JS): Try to fill in missing recency data for games a player didn't play
+    for data_index, row in data.iterrows():
+        for recent_cat in weighted_average_cats:
+            numerator = denominator = 0
+            for i in range(max_lag+1):
+                if row['RECENT_MIN{}'.format(i)] > 0.0:
+                    numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (max_lag + 1 - i)
+                    denominator += (max_lag + 1 - i)
+            data.at[data_index, '{}{}_weighted_average'.format(recent_cat, suffix)] = numerator/denominator
+
 
     return data
 
