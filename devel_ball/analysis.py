@@ -51,10 +51,13 @@ PARAMS = {
     # Whether or not to make the machine learning random or be seeded for deterministic results
     'random': False,
 
+    # The amount of recent games to use in weighted average for recent stats
+    'recent_stat_lag': 5,
+
     # Parameters of the specific machine learning model
     'model': {
         'type': 'RIDGE_REGRESSION',
-        'eliminate_keys': False,
+        'parameter_iteration_mode': 'ALL',
         'improvement_percent_gate': 0.005,
     },
 
@@ -87,6 +90,12 @@ class PredictionType(Enum):
     PP = 3  # per possession
 
 
+class ParameterIterationMode(Enum):
+    ALL = 1     # Use all parameters
+    ADD = 2     # Start with no parameters, and add them
+    REMOVE = 3  # Start with all parameters, and remove them
+
+
 class ModelType(Enum):
     RIDGE_REGRESSION = 1
     NEURAL_NET = 2
@@ -111,7 +120,7 @@ def get_categories(data):
     return pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats
 
 
-def cleanup_recent_cats(data, rec_cats, prediction_type):
+def cleanup_recent_cats(data, rec_cats, prediction_type, stat_lag):
     """
     Cleanup the recent categories, where data may be missing (like if you've only played 2 games so far,
     yet we track for up to 10 games.
@@ -127,6 +136,7 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     :param data: The input data to cleanup
     :param rec_cats: the recent categories in the dataset
     :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    :param stat_lag: the amount of recent games to consider for weighted averages of recent stats
     """
 
     # Figure out all the unique recent categories, and how far back they go in "lag" of games
@@ -135,6 +145,7 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     max_lag = max(
         int(c[len(random_recent_cat):]) for c in rec_cats if random_recent_cat in c
     )
+    weighted_average_lag = min(stat_lag, max_lag)
 
     # Update the recent stats that are not filled out with the average up until that point
     for rec_cat in unique_recent_cats:
@@ -194,11 +205,17 @@ def cleanup_recent_cats(data, rec_cats, prediction_type):
     for data_index, row in data.iterrows():
         for recent_cat in weighted_average_cats:
             numerator = denominator = 0
-            for i in range(max_lag+1):
+            for i in range(weighted_average_lag + 1):
                 if row['RECENT_{}{}'.format(check_for_playing_category, i)] > 0.0:
-                    numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (max_lag + 1 - i)
-                    denominator += (max_lag + 1 - i)
-            data.at[data_index, '{}{}_weighted_average'.format(recent_cat, suffix)] = numerator/denominator
+                    numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (weighted_average_lag + 1 - i)
+                    denominator += (weighted_average_lag + 1 - i)
+            # Handle the case where no games were played. Use the regular average of this stat in the case that there
+            # is no recent data to use.
+            stat_type = recent_cat.split('RECENT_')[1]
+            regular_stat_name = stat_type if stat_type in data.columns else '{}{}'.format(stat_type, suffix)
+            data.at[data_index, '{}{}_weighted_average'.format(recent_cat, suffix)] = (
+                numerator/denominator if denominator > 0.0 else row[regular_stat_name]
+            )
     # Remove the old raw recent stats that are of no interest now that the weighted average exists
     for recent_cat in weighted_average_cats:
         for i in range(max_lag+1):
@@ -325,6 +342,7 @@ def cleanup_data(
     train=True,
     min_MPG=15.,
     min_games_played=5,
+    recent_stat_lag=10,
 ):
     """
     Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
@@ -338,6 +356,7 @@ def cleanup_data(
     :param bool train: Whether or not this is a part of training
     :param min_MPG: the minimum MPG to include a player in the data
     :param min_games_played: the minimum games played thus far this year to include the player in the data
+    :param recent_stat_lag: the amount of recent games to consider for weighted averages of recent stats
 
     :returns: data_X, data_Y, data_accounting, data_pipeline
     """
@@ -363,7 +382,7 @@ def cleanup_data(
     pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats = get_categories(data)
 
     # Cleanup the recent categories where data may be missing, and update for specified prediction_type
-    data = cleanup_recent_cats(data, rec_cats, prediction_type)
+    data = cleanup_recent_cats(data, rec_cats, prediction_type, recent_stat_lag)
 
     # Filter the data
     data = filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats)
@@ -425,8 +444,10 @@ def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
 
 
 def get_regression_model(
-    X_train, Y_train, X_validation, Y_validation, random, eliminate_keys=False, improvement_percent_gate=0.005
+    X_train, Y_train, X_validation, Y_validation, random, parameter_iteration_mode="ALL", improvement_percent_gate=0.005
 ):
+
+    parameter_iteration_mode = ParameterIterationMode[parameter_iteration_mode]
 
     # Because this model explicitly uses direct training, or cross validation which handles train/validation
     # splitting, we might as well use all the data we have available
@@ -442,58 +463,95 @@ def get_regression_model(
         for feature_i, coef in sorted_coef:
             print('  {:35s} {}'.format(model.feature_names_in_[feature_i], round(coef, 6)))
 
+    # Do an initial fit
     ridge_reg = Ridge()
     ridge_reg.fit(X_train, Y_train)
-    if not eliminate_keys:
+
+    # If we want to use all parameters, return now:
+    if parameter_iteration_mode == ParameterIterationMode.ALL:
         print("\nModel description:")
         print_model(ridge_reg)
         return ridge_reg
 
-    ### TODO (JS): test better elimination of keys ###
-    # TODO (JS): probably want to make this an enum of like type "ALL", "ADD_KEYS", "REMOVE_KEYS". probably something
-    # worth being able to test/iterate on differently for different stats/pg/pm/pp
+    # ElIf specified to, remove parameters one by one as the model improves, and return the resultant model
+    elif parameter_iteration_mode == ParameterIterationMode.REMOVE:
 
-    final_keys = set(X_train.keys())
-    final_score = -np.mean(
-        cross_val_score(ridge_reg, X_train, Y_train, scoring="neg_mean_absolute_error", cv=10)
-    )
-    final_test_ridge_reg = Ridge()
-    print("\nIteratively removing keys to improve the model. Starting score: {}".format(final_score))
-    while True:
+        final_keys = set(X_train.keys())
+        final_score = -np.mean(
+            cross_val_score(ridge_reg, X_train, Y_train, scoring="neg_mean_absolute_error", cv=10)
+        )
+        final_test_ridge_reg = Ridge()
+        print("\nIteratively removing keys to improve the model. Starting score: {}".format(final_score))
+        while True:
 
-        # TODO (JS): this is for testing:
-        print("total keys remaining: {}".format(len(final_keys)))
-
-        # Look for the next best key to remove
-        best_score = np.inf
-        best_key_to_remove = None
-        test_ridge_reg = Ridge()
-        # Consider all keys still existing in final keys:
-        for key_to_test in final_keys:
-            keys = [key for key in final_keys if key != key_to_test]
-            score = -np.mean(
-                cross_val_score(
-                    test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
+            # Look for the next best key to remove
+            best_score = np.inf
+            best_key_to_remove = None
+            test_ridge_reg = Ridge()
+            # Consider all keys still existing in final keys:
+            for key_to_test in final_keys:
+                keys = [key for key in final_keys if key != key_to_test]
+                score = -np.mean(
+                    cross_val_score(
+                        test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
+                    )
                 )
-            )
-            if score < best_score:
-                best_score = score
-                best_key_to_remove = key_to_test
-        # If new result is better than the previously found best result, update
-        # TODO (JS): figure out if improvement gate makes sense here, may need tuning
-        if best_score < final_score:
-            final_score = best_score
-            final_keys.remove(best_key_to_remove)
-            final_test_ridge_reg.fit(X_train[final_keys], Y_train)
-            # TODO (JS): format this print
-            print("\nIntermediate state, removed: {}, score: {}:".format(best_key_to_remove, final_score))
-        # Else we are no longer improving, and stop iterating
-        else:
-            break
+                if score < best_score:
+                    best_score = score
+                    best_key_to_remove = key_to_test
 
-    # TODO (JS): de-dupe this logic in both methods of doing key removal/addition
+            # If new result is better than the previously found best result, update. Not using improvement gate
+            # here since we should be "liberal" in removing parameters, less parameters is simpler and better.
+            if best_score < final_score:
+                final_score = best_score
+                final_keys.remove(best_key_to_remove)
+                final_test_ridge_reg.fit(X_train[final_keys], Y_train)
+                print("\nIntermediate state, removed: {}, keys remaining: {}, score: {}:"
+                        .format(best_key_to_remove, len(final_keys), final_score)
+                )
+            # Else we are no longer improving, and stop iterating
+            else:
+                break
+
+    # Else if specified to, add parameters one by one as the model improves, and return the resultant model
+    elif parameter_iteration_mode == ParameterIterationMode.ADD:
+
+        # Iterate until the best final combination of keys is found
+        print("\nIteratively adding keys to improve the model.")
+        final_keys = []
+        final_score = np.inf
+        final_test_ridge_reg = Ridge()
+        while True:
+            # Look for the next best key
+            best_score = np.inf
+            best_key = None
+            test_ridge_reg = Ridge()
+            # Consider all keys not already in final_keys
+            for key in list(set(X_train.keys()) - set(final_keys)):
+                keys = final_keys + [key]
+                score = -np.mean(
+                    cross_val_score(
+                        test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
+                    )
+                )
+                if score < best_score:
+                    best_score = score
+                    best_key = key
+            # If new result is better than the previously found best result, update
+            if best_score < final_score and 100*(final_score - best_score) / best_score > improvement_percent_gate:
+                final_score = best_score
+                final_keys.append(best_key)
+                final_test_ridge_reg.fit(X_train[final_keys], Y_train)
+                print("\nIntermediate state, score: {}:".format(final_score))
+                print_model(final_test_ridge_reg)
+            # Else we are no longer improving, and stop iterating
+            else:
+                break
+
+    else:
+        raise Exception("Invalid iteration mode provided: {}".format(parameter_iteration_mode))
+
     # Remove the keys that are found to not be used
-    import IPython; IPython.embed()
     for key_i, key in enumerate(X_train.keys()):
         # If key isn't used, set it to 0.0
         if key not in final_keys:
@@ -501,57 +559,6 @@ def get_regression_model(
         # Else key is used, set the coefficient based on the model with the proper keys
         else:
             ridge_reg.coef_[0][key_i] = final_test_ridge_reg.coef_[0][list(final_keys).index(key)]
-    ridge_reg.intercept_ = final_test_ridge_reg.intercept_
-
-    print("\nFinal Model description:")
-    print_model(ridge_reg)
-
-    return ridge_reg
-
-
-
-    ###################################################
-
-    # Iterate until the best final combination of keys is found
-    print("\nIteratively adding keys to improve the model.")
-    final_keys = []
-    final_score = np.inf
-    final_test_ridge_reg = Ridge()
-    while True:
-        # Look for the next best key
-        best_score = np.inf
-        best_key = None
-        test_ridge_reg = Ridge()
-        # Consider all keys not already in final_keys
-        for key in list(set(X_train.keys()) - set(final_keys)):
-            keys = final_keys + [key]
-            score = -np.mean(
-                cross_val_score(
-                    test_ridge_reg, X_train[keys], Y_train, scoring="neg_mean_absolute_error", cv=10
-                )
-            )
-            if score < best_score:
-                best_score = score
-                best_key = key
-        # If new result is better than the previously found best result, update
-        if best_score < final_score and 100*(final_score - best_score) / best_score > improvement_percent_gate:
-            final_score = best_score
-            final_keys.append(best_key)
-            final_test_ridge_reg.fit(X_train[final_keys], Y_train)
-            print("\nIntermediate state, score: {}:".format(final_score))
-            print_model(final_test_ridge_reg)
-        # Else we are no longer improving, and stop iterating
-        else:
-            break
-
-    # Remove the keys that are found to not be used
-    for key_i, key in enumerate(X_train.keys()):
-        # If key isn't used, set it to 0.0
-        if key not in final_keys:
-            ridge_reg.coef_[0][key_i] = 0.0
-        # Else key is used, set the coefficient based on the model with the proper keys
-        else:
-            ridge_reg.coef_[0][key_i] = final_test_ridge_reg.coef_[0][final_keys.index(key)]
     ridge_reg.intercept_ = final_test_ridge_reg.intercept_
 
     print("\nFinal Model description:")
@@ -661,6 +668,7 @@ def get_model(data):
     train_to_validation_ratio = PARAMS['train_to_validation_ratio']
     random = PARAMS['random']
     model_params = PARAMS['model']
+    recent_stat_lag = PARAMS['recent_stat_lag']
 
     # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
     # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
@@ -673,53 +681,8 @@ def get_model(data):
         train=True,
         min_MPG=min_MPG,
         min_games_played=min_games_played,
+        recent_stat_lag=recent_stat_lag,
     )
-
-    """
-    data_X = data_X[[
-        'PTSpm',
-        'AST_TOVgm',
-        'RECENT_PTSpm_weighted_average',
-        'PER',
-        'PIEgm',
-        'DREBpm',
-        'TOvsTm',
-        'FG3Mpm',
-        'REB_PCT',
-        'TOpm',
-        'FG3Apm',
-        'TS_PCT',
-        'BLKgm',
-        'PIEtm',
-        'PIE',
-        'TOtm',
-        'AST_PCTvsTm',
-        'PACEtm',
-        'AST_TOV',
-        'BLKtm',
-        'RECENT_USG_PCTpm_weighted_average',
-        'GAME_SCORE',
-        'AST_PCTtm',
-        'BLKvsTm',
-        'POSStm',
-        'OREBpm',
-        'RECENT_TOpm_weighted_average',
-        'PTStm',
-        'RECENT_ASTpm_weighted_average',
-        'PLUS_MINUSpm',
-        'AST_PCT',
-        'STLtm',
-        'BLKpm',
-        'PFtm',
-        'FTP',
-        'FG3Ptm',
-        'FTPtm',
-        'FTPvsTm',
-        'DEF_RTG',
-        'DREBvsTm',
-        'HOME',
-    ]]
-    """
 
     # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
     # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
