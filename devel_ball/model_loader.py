@@ -153,6 +153,9 @@ def assign_rotation_data(team_rotation_data, team_game):
     player_id_index = team_rotation_data['headers'].index('PERSON_ID')
     in_time_index = team_rotation_data['headers'].index('IN_TIME_REAL')
     out_time_index = team_rotation_data['headers'].index('OUT_TIME_REAL')
+    pts_index = team_rotation_data['headers'].index('PLAYER_PTS')
+    team_point_diff_index = team_rotation_data['headers'].index('PT_DIFF')
+    usg_pct_index = team_rotation_data['headers'].index('USG_PCT')
 
     # Iterate over the different rotation players in/out
     player_segments = []
@@ -162,6 +165,9 @@ def assign_rotation_data(team_rotation_data, team_game):
                 player_id=str(player_segment[player_id_index]),
                 in_time=player_segment[in_time_index]/600.0,  # Convert from deciseconds to seconds
                 out_time=player_segment[out_time_index]/600.0,  # Convert from deciseconds to seconds
+                points=player_segment[pts_index],
+                team_point_diff=player_segment[team_point_diff_index],
+                usg_pct=player_segment[usg_pct_index],
             )
         )
 

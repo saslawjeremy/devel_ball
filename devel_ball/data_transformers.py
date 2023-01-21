@@ -86,10 +86,10 @@ def get_cleanup_pipeline(data):
     cat_attribs = ['HOME']
 
     num_pipeline = Pipeline([
+        ('float_maker', FloatMaker()),
         ('negative_value_remover', NegativeValueRemover()),
         ('outlier_remover', OutlierRemover()),
         ('min_max_scalar', MinMaxScaler()),
-        ('float_maker', FloatMaker()),
     ])
     full_pipeline = ColumnTransformer([
         ('num', num_pipeline, num_attribs),

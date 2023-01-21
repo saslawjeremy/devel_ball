@@ -58,7 +58,7 @@ PARAMS = {
     'model': {
         'type': 'RIDGE_REGRESSION',
         'parameter_iteration_mode': 'ALL',
-        'improvement_percent_gate': 0.005,
+        'improvement_percent_gate': 0.01,
     },
 
     # 'model': {
@@ -463,6 +463,9 @@ def get_regression_model(
         for feature_i, coef in sorted_coef:
             print('  {:35s} {}'.format(model.feature_names_in_[feature_i], round(coef, 6)))
 
+    # import statsmodels.api as sm
+    # return sm.OLS(Y_train, X_train).fit()
+
     # Do an initial fit
     ridge_reg = Ridge()
     ridge_reg.fit(X_train, Y_train)
@@ -754,8 +757,18 @@ def get_model(data):
     print('{:35s}                 : {}'.format("Baseline from average {}".format(stat_name), baseline_average))
     print('{:35s}                 : {} %\n\n'.format("Improvement over baseline", round(improvement, 2)))
 
-    # import IPython; IPython.embed()
+    import IPython; IPython.embed()
     return model, data_pipeline
+
+
+def residual_plot(model, X_test, Y_test):
+    predict = model.predict(X_test)
+    residual = Y_test - predict
+    plt.scatter(predict, residual)
+    plt.title('Residual plot')
+    plt.xlabel('Predictions')
+    plt.ylabel('Residuals')
+    plt.show()
 
 
 def predict_from_model(model, data_pipeline, data):

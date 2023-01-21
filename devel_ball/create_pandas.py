@@ -27,7 +27,7 @@ from .model_loader import query_nba_api
 GAME_VALUES = [
 
     # Basic accounting
-    'PLAYER_ID', 'DATE',
+    'PLAYER_ID', 'DATE', 'GAME_ID', 'TEAM_ID',
 
     # Things to predict
     'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS', 'PTS', 'REB', 'AST',
@@ -95,7 +95,7 @@ class DK_PLAYER(object):
     injury_status = attr.ib(default='')
 
 
-def get_game_dict(player_id, date, player_stats, home, team_stats, vs_team_stats, results=None): #official_stats):
+def get_game_dict(player_id, date, game_id, team_id, player_stats, home, team_stats, vs_team_stats, results=None): #official_stats):
 
     game_dict = {value: None for value in GAME_VALUES}
 
@@ -248,6 +248,8 @@ def create_training_dataframe(year, pickle_name):
             game_dict = get_game_dict(
                 player_id=player_season.player_id,
                 date=player_game.date,
+                game_id=player_game.game_id,
+                team_id=team_season.team_id,
                 player_stats=player_game.stats,
                 home=player_game.home,
                 team_stats=team_game.stats,
@@ -483,10 +485,15 @@ def create_predicting_dataframe(year, pickle_name, today):
                 print("{}: SKIPPING for no vs_team_season".format(dk_player.dk_player_entry.name))
                 dk_player.predicting = False
 
+        # TODO (JS): fix me
+        raise Exception("Jeremy - fix this!")
         if dk_player.predicting:
             game_dict = get_game_dict(
                 player_id=dk_player.player_entry.id,
                 date=date.isoformat(),
+                # TODO (JS): fix me
+                # game_id=player_game.game_id,
+                # team_id=team_season.team_id,
                 player_stats=player_season.current_stats,
                 home=dk_player.home,
                 team_stats=team_season.current_stats,

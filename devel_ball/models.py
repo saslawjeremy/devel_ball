@@ -137,6 +137,9 @@ class PlayerRotationMinutes(EmbeddedDocument):
     player_id = StringField()
     in_time = FloatField()
     out_time = FloatField()
+    points = IntField()
+    team_point_diff = IntField()
+    usg_pct = FloatField()
 
 
 class PlayerGame(EmbeddedDocument):
@@ -222,10 +225,12 @@ class TeamAdvancedStatsPerGame(EmbeddedDocument):
 class LineupData(EmbeddedDocument):
     """ Rotation rotations per lineup for the season going into any given game of that season. """
     players = ListField(StringField())
-    minutes = ListField(FloatField(), default=list) # List where the index is season game, so index 1 means
-                                                    # the rotation data going into the 2nd game of the season.
-                                                    # Note the 0th index will have no data because there is no
-                                                    # minutes data going into the 1st game.
+    # The below are lists, where the index is season game, so index 1 means the rotation data going
+    # into the 2nd game of the season. Note the 0th index will have no data because there is no
+    # minutes data going into the 1st game.
+    minutes = ListField(FloatField(), default=list)
+    points = ListField(IntField(), default=list)
+    team_point_diff = ListField(IntField(), default=list)
 
 
 class TeamStats(EmbeddedDocument):

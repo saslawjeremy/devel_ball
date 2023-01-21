@@ -263,6 +263,8 @@ def update_team_total_stats(total_stats, team_game, vs_team_game):
 def update_rotation_stats(rotation_stats, lineups_seen, team_game):
     """ Update a team's rotation stats for the season with the current game. """
 
+    import IPython; IPython.embed()
+
     # First build the lineups played in this game, with a 1 second resolution
     game_total_seconds = int(60 * max(player_mins.out_time for player_mins in team_game.game_rotation))
     seconds_map = {sec: SortedSet() for sec in range(game_total_seconds)}
