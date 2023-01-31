@@ -1,9 +1,13 @@
 import datetime
 from datetime import timedelta
-from collections import namedtuple
+from collections import (
+    namedtuple,
+    deque,
+)
 from recordclass import recordclass
 from copy import deepcopy
 from sortedcontainers import SortedSet
+import numpy as np
 
 from .models import (
     Season,
@@ -263,8 +267,6 @@ def update_team_total_stats(total_stats, team_game, vs_team_game):
 def update_rotation_stats(rotation_stats, lineups_seen, team_game):
     """ Update a team's rotation stats for the season with the current game. """
 
-    import IPython; IPython.embed()
-
     # First build the lineups played in this game, with a 1 second resolution
     game_total_seconds = int(60 * max(player_mins.out_time for player_mins in team_game.game_rotation))
     seconds_map = {sec: SortedSet() for sec in range(game_total_seconds)}
@@ -305,12 +307,14 @@ def update_rotation_stats(rotation_stats, lineups_seen, team_game):
         rotation.minutes.append(minutes_for_rotation)
 
 
-def add_team_season_data(years):
+def add_team_season_data(years, minutes_played_threshold=3.0, players_played_recency=8):
     """
     Create data for each team over the course of a given season
 
-    :param years: the years to create team season data
-    :type  years: list[str]
+    :param list[str] years: the years to create team season data
+    :param minutes_played_threshold: the amount of minutes to be played for a player to be considered to have played
+    :param players_played_recency: the maximum amount of recent games to consider when looking for how many
+                                   players a coach normally plays in a game
     """
     for year in years:
 
@@ -324,8 +328,8 @@ def add_team_season_data(years):
             team_season.year = year
 
             total_stats = TeamTotalSeasonStats()
-            # lineups_to_season_minutes = {}
             lineups_seen = set()
+            players_played_in_games = deque(maxlen=players_played_recency)
 
             # Iterate over each game that team played in this season
             for season_index, game_id in enumerate(team.years[year]):
@@ -355,6 +359,15 @@ def add_team_season_data(years):
                 vs_team_game = game.team_games[team_game.opposing_team_id]
                 print(f"Game {season_index+1}: {team.name} vs. "
                       f"{Team.objects(unique_id=team_game.opposing_team_id)[0].name}")
+
+                if players_played_in_games:
+                    season_date.players_played_per_game = int(np.round(np.mean(players_played_in_games)))
+                players_played_in_games.append(
+                    sum(
+                        1 for player_game in game.player_games.values() if player_game.team_id == team.id
+                        and player_game.traditional_stats.MIN > minutes_played_threshold
+                    )
+                )
 
                 team_season.season_stats.append(season_date)
 

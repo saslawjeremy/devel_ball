@@ -4,11 +4,14 @@ import pandas as pd
 from argparse import ArgumentParser
 import pickle
 import os
+from mongoengine import connect
 
 from devel_ball.analysis import get_model
 
 
 if __name__ == '__main__':
+
+    connect('devel_ball')
 
     parser = ArgumentParser()
     parser.add_argument('--years', default=['2018-19'], nargs='*',

@@ -27,7 +27,7 @@ from .model_loader import query_nba_api
 GAME_VALUES = [
 
     # Basic accounting
-    'PLAYER_ID', 'DATE', 'GAME_ID', 'TEAM_ID',
+    'PLAYER_ID', 'DATE', 'GAME_ID', 'TEAM_ID', 'YEAR',
 
     # Things to predict
     'DK_POINTS', 'MIN', 'POSS', 'DK_POINTS_PER_MIN', 'DK_POINTS_PER_POSS', 'PTS', 'REB', 'AST',
@@ -95,13 +95,16 @@ class DK_PLAYER(object):
     injury_status = attr.ib(default='')
 
 
-def get_game_dict(player_id, date, game_id, team_id, player_stats, home, team_stats, vs_team_stats, results=None): #official_stats):
+def get_game_dict(player_id, date, game_id, team_id, player_stats, home, team_stats, vs_team_stats, year, results=None): #official_stats):
 
     game_dict = {value: None for value in GAME_VALUES}
 
     # Set basic accounting params
     game_dict['PLAYER_ID'] = player_id
     game_dict['DATE'] = date
+    game_dict['GAME_ID'] = game_id
+    game_dict['TEAM_ID'] = team_id
+    game_dict['YEAR'] = year
 
     # Set results of the game if provided
     if results is not None:
@@ -255,6 +258,7 @@ def create_training_dataframe(year, pickle_name):
                 team_stats=team_game.stats,
                 vs_team_stats=vsTeam_game.stats,
                 #official_stats,
+                year=year,
                 results=player_game.results,
             )
             list_of_all_player_data.append(pd.DataFrame([game_dict]))
@@ -494,6 +498,7 @@ def create_predicting_dataframe(year, pickle_name, today):
                 # TODO (JS): fix me
                 # game_id=player_game.game_id,
                 # team_id=team_season.team_id,
+                # year=year,
                 player_stats=player_season.current_stats,
                 home=dk_player.home,
                 team_stats=team_season.current_stats,

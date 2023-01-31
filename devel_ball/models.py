@@ -162,6 +162,7 @@ class TeamGame(EmbeddedDocument):
     traditional_stats = EmbeddedDocumentField(GameTraditionalStats)
     advanced_stats = EmbeddedDocumentField(GameAdvancedStats)
     game_rotation = ListField(EmbeddedDocumentField(PlayerRotationMinutes))
+    inactives = ListField(StringField(), default=list)
 
 
 class Game(Document):
@@ -169,7 +170,6 @@ class Game(Document):
     game_id = StringField(primary_key=True)
     date = StringField()
     year = StringField()
-    inactives = ListField(StringField())
     officials = ListField(StringField())
     player_games = DictField(EmbeddedDocumentField(PlayerGame))  # Key is player_id
     team_games = DictField(EmbeddedDocumentField(TeamGame))  # Key is team_id
@@ -253,6 +253,7 @@ class TeamSeasonDate(EmbeddedDocument):
     opposing_team_id = StringField()
     officials = ListField(StringField())
     stats = EmbeddedDocumentField(TeamStats)
+    players_played_per_game = IntField()
 
 
 class TeamSeason(Document):

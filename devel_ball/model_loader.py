@@ -5,6 +5,12 @@ import numpy as np
 import pandas as pd
 from json import JSONDecodeError
 from requests.exceptions import ConnectionError
+from colorama import (
+    Fore,
+    Back,
+    Style,
+)
+import socket
 
 from nba_api.stats.endpoints import (
     leaguedashplayerstats,
@@ -51,7 +57,7 @@ def query_nba_api(endpoint, sleep_time=1.5, fail_sleep_time=30, quiet=False, all
     while True:
         try:
             return endpoint(**kwargs)
-        except (ConnectionError, JSONDecodeError) as e:
+        except (ConnectionError, JSONDecodeError, socket.timeout) as e:
             if allow_error:
                 raise e
             print("    -- Timed out, retrying! --")
@@ -400,10 +406,22 @@ def get_games(years):
                 player_games = {}
                 game.player_games = player_games
                 for player_id, player in players_traditional.iterrows():
+                    player_name = player['PLAYER_NAME']
+
+                    # Skip players that are actually not playing. Many are explicitly marked as inactive,
+                    # but some are listed in this table and have to be filtered manually
+                    if 'njury' in player['COMMENT'] or 'llness' in player['COMMENT'] or 'DND' in player['COMMENT'] or 'uspension' in player['COMMENT'] or 'NWT' in player['COMMENT'] or 'ersonal' in player['COMMENT'] or 'ealth' in player['COMMENT'] or 'Rest' in player['COMMENT']:
+                        print(
+                            "Player: {}  (id: {})  ".format(player_name, player_id)
+                            + Back.RED + "INACTIVE" + Style.RESET_ALL
+                        )
+                        continue
 
                     # Gather player info and add to db for this year if not already stored
-                    player_name = player['PLAYER_NAME']
-                    print("Player: {}  (id: {})".format(player_name, player_id))
+                    if player['COMMENT'] and player['COMMENT'] != 'DNP - Coach\'s Decision':
+                        print("Player: {}  (id: {})  ".format(player_name, player_id) + Back.GREEN + Fore.BLACK + player['COMMENT'] + Style.RESET_ALL)
+                    else:
+                        print("Player: {}  (id: {})".format(player_name, player_id))
                     add_entry_to_db(
                         document_type=Player,
                         unique_id=player_id,

@@ -23,6 +23,7 @@ from keras.callbacks import EarlyStopping
 from devel_ball.models import Player
 from devel_ball.post_process import get_dk_points
 from devel_ball.data_transformers import get_cleanup_pipeline
+from devel_ball.minutes import get_min_predictions
 
 
 ############################################ PARAMATERS ############################################
@@ -52,7 +53,7 @@ PARAMS = {
     'random': False,
 
     # The amount of recent games to use in weighted average for recent stats
-    'recent_stat_lag': 5,
+    'recent_stat_lag': 6,
 
     # Parameters of the specific machine learning model
     'model': {
@@ -116,7 +117,7 @@ def get_categories(data):
     pm_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pm'] # per-minute
     pp_cats = [cat for cat in list(data.columns) if cat[-2:] == 'pp'] # per-possession
     rec_cats = [cat for cat in list(data.columns) if cat[:6] == 'RECENT'] # recent-cats
-    accounting_cats = ['PLAYER_ID', 'DATE']
+    accounting_cats = ['PLAYER_ID', 'DATE', 'GAME_ID', 'TEAM_ID', 'YEAR']
     return pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats
 
 
@@ -205,10 +206,10 @@ def cleanup_recent_cats(data, rec_cats, prediction_type, stat_lag):
     for data_index, row in data.iterrows():
         for recent_cat in weighted_average_cats:
             numerator = denominator = 0
-            for i in range(weighted_average_lag + 1):
-                if row['RECENT_{}{}'.format(check_for_playing_category, i)] > 0.0:
-                    numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (weighted_average_lag + 1 - i)
-                    denominator += (weighted_average_lag + 1 - i)
+            for i in range(weighted_average_lag):
+                if row['RECENT_{}{}'.format(check_for_playing_category, i)] is not None:
+                    numerator += row['{}{}{}'.format(recent_cat, i, suffix)] * (weighted_average_lag - i)
+                    denominator += (weighted_average_lag - i)
             # Handle the case where no games were played. Use the regular average of this stat in the case that there
             # is no recent data to use.
             stat_type = recent_cat.split('RECENT_')[1]
@@ -676,7 +677,7 @@ def get_model(data):
     # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
     # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
     # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
-    data_X, data_Y, data_accounting, data_pipeline = cleanup_data(
+    data_X_initial, data_Y_initial, data_accounting, data_pipeline = cleanup_data(
         data,
         prediction_stat=prediction_stat,
         prediction_type=prediction_type,
@@ -690,7 +691,7 @@ def get_model(data):
     # Extract the components of data_X and data_Y relevant to the machine learning model. For example, if
     # predicting PTS and PM (per minute), then data_X would be filtered to only include the data relevant to
     # predictiong PTS, and data_Y would be filtered to only PTS.
-    data_X, data_Y = filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type)
+    data_X, data_Y = filter_data_for_ml_model(data_X_initial, data_Y_initial, prediction_stat, prediction_type)
 
     # Split data into train and test data
     X_train_full, X_test, Y_train_full, Y_test = train_test_split(
@@ -756,6 +757,14 @@ def get_model(data):
     print('\n\n{:35s}                 : {}'.format("MAE", mae))
     print('{:35s}                 : {}'.format("Baseline from average {}".format(stat_name), baseline_average))
     print('{:35s}                 : {} %\n\n'.format("Improvement over baseline", round(improvement, 2)))
+
+    ###### TODO (JS): do stuffs #####
+    min_predictions = get_min_predictions(data_X, data_accounting)
+    X_test_min_predictions = min_predictions.loc[X_test.index]
+    model_predict_pts = (X_test_min_predictions * model.predict(X_test))['MIN_PREDICTION']
+    ground_truth_pts = data_Y_initial.loc[Y_test.index]['MIN'] * data_Y_initial.loc[Y_test.index]['PTSpm']
+    print("Points error: {}".format(mean_absolute_error(model_predict_pts, ground_truth_pts)))
+    #################################
 
     import IPython; IPython.embed()
     return model, data_pipeline
