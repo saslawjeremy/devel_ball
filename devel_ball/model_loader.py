@@ -4,7 +4,10 @@ from time import sleep
 import numpy as np
 import pandas as pd
 from json import JSONDecodeError
-from requests.exceptions import ConnectionError
+from requests.exceptions import (
+    ConnectionError,
+    ReadTimeout,
+)
 from colorama import (
     Fore,
     Back,
@@ -57,7 +60,7 @@ def query_nba_api(endpoint, sleep_time=1.5, fail_sleep_time=30, quiet=False, all
     while True:
         try:
             return endpoint(**kwargs)
-        except (ConnectionError, JSONDecodeError, socket.timeout) as e:
+        except (ConnectionError, JSONDecodeError, socket.timeout, ReadTimeout) as e:
             if allow_error:
                 raise e
             print("    -- Timed out, retrying! --")
@@ -323,6 +326,7 @@ def get_games(years):
                     print("ENTERING WEIRD STATE - FIXME!")
                     box_score_summary = query_nba_api(
                         boxscoresummaryv2.BoxScoreSummaryV2, game_id=game_id, allow_error=False)
+
                 except JSONDecodeError:
                     print("ENTERING WEIRD STATE - FIXME!")
                     invalid_game_ids.append(game_id)
@@ -340,13 +344,6 @@ def get_games(years):
                 ) != 'final':
                     print("Game is still happening, skipping for now.\n")
                     continue
-
-                # Store inactive players
-                game.inactives = [
-                    str(inactive_player) for inactive_player in
-                    box_score_summary.inactive_players.get_data_frame()
-                        ['PLAYER_ID'].to_list()
-                ]
 
                 # Store officials for this game (create Official if needed)
                 officials_df = clean_boxscore_df(
@@ -402,6 +399,58 @@ def get_games(years):
                 print('\n{}     Loading game: {} vs. {}     {}'
                       .format('#'*10, team_names[0], team_names[1], '#'*10))
 
+                # Create each TeamGame and map them to team_id
+                team_games = {}
+                game.team_games = team_games
+                for team_id, team in teams_traditional.iterrows():
+
+                    # Gather team info and add to db for this year if not already stored
+                    team_name = '{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
+                    print("Team: {}  (id: {})".format(team_name, team_id))
+                    add_entry_to_db(
+                        document_type=Team,
+                        unique_id=team_id,
+                        name=team_name,
+                        year=year,
+                        game_id=game_id
+                    )
+
+                    # Create TeamGame entry to add to this game
+                    team_game = TeamGame(team_id=team_id)
+                    team_games[team_id] = team_game
+
+                    # Store basic data about TeamGame
+                    team_game.date = date
+                    if team_id == home_team_id:
+                        team_game.home = True
+                        team_game.opposing_team_id = road_team_id
+                    else:
+                        team_game.home = False
+                        team_game.opposing_team_id = home_team_id
+
+                    # Create traditional stats entry for this team
+                    traditional_team_entry = GameTraditionalStats()
+                    team_game.traditional_stats = traditional_team_entry
+                    assign_all_values(traditional_team_entry, team)
+
+                    # Create advanced stats entry for this team
+                    advanced_team_entry = GameAdvancedStats()
+                    team_game.advanced_stats = advanced_team_entry
+                    assign_all_values(advanced_team_entry, teams_advanced.loc[team_id])
+
+                    # Create rotation data
+                    team_rotation_data = game_rotation.home_team.data if team_game.home else game_rotation.away_team.data
+                    assign_rotation_data(team_rotation_data, team_game)
+
+                # Store inactive players that are marked ianctive by the NBA
+                inactives_dict = box_score_summary.inactive_players.get_dict()
+                player_id_index = inactives_dict['headers'].index('PLAYER_ID')
+                team_id_index = inactives_dict['headers'].index('TEAM_ID')
+                for inactive_tuple in inactives_dict['data']:
+                    game.team_games[str(inactive_tuple[team_id_index])].inactives.append(
+                        str(inactive_tuple[player_id_index])
+                    )
+
                 # Create each PlayerGame and map them to player_id
                 player_games = {}
                 game.player_games = player_games
@@ -410,11 +459,22 @@ def get_games(years):
 
                     # Skip players that are actually not playing. Many are explicitly marked as inactive,
                     # but some are listed in this table and have to be filtered manually
-                    if 'njury' in player['COMMENT'] or 'llness' in player['COMMENT'] or 'DND' in player['COMMENT'] or 'uspension' in player['COMMENT'] or 'NWT' in player['COMMENT'] or 'ersonal' in player['COMMENT'] or 'ealth' in player['COMMENT'] or 'Rest' in player['COMMENT']:
+                    if (
+                        'njury' in player['COMMENT'] or
+                        'llness' in player['COMMENT'] or
+                        'DND' in player['COMMENT'] or
+                        'uspension' in player['COMMENT'] or
+                        'NWT' in player['COMMENT'] or
+                        'ersonal' in player['COMMENT'] or
+                        'ealth' in player['COMMENT'] or
+                        'Rest' in player['COMMENT']
+                    ):
                         print(
                             "Player: {}  (id: {})  ".format(player_name, player_id)
                             + Back.RED + "INACTIVE" + Style.RESET_ALL
                         )
+                        # Add to inactives list for this team
+                        game.team_games[player['TEAM_ID']].inactives.append(player_id)
                         continue
 
                     # Gather player info and add to db for this year if not already stored
@@ -459,49 +519,6 @@ def get_games(years):
                     player_game.usage_stats = usage_player_entry
                     assign_all_values(usage_player_entry, players_usage.loc[player_id])
 
-
-                # Create each TeamGame and map them to team_id
-                team_games = {}
-                game.team_games = team_games
-                for team_id, team in teams_traditional.iterrows():
-
-                    # Gather team info and add to db for this year if not already stored
-                    team_name = '{} {}'.format(team['TEAM_CITY'], team['TEAM_NAME'])
-                    print("Team: {}  (id: {})".format(team_name, team_id))
-                    add_entry_to_db(
-                        document_type=Team,
-                        unique_id=team_id,
-                        name=team_name,
-                        year=year,
-                        game_id=game_id
-                    )
-
-                    # Create TeamGame entry to add to this game
-                    team_game = TeamGame(team_id=team_id)
-                    team_games[team_id] = team_game
-
-                    # Store basic data about TeamGame
-                    team_game.date = date
-                    if team_id == home_team_id:
-                        team_game.home = True
-                        team_game.opposing_team_id = road_team_id
-                    else:
-                        team_game.home = False
-                        team_game.opposing_team_id = home_team_id
-
-                    # Create traditional stats entry for this team
-                    traditional_team_entry = GameTraditionalStats()
-                    team_game.traditional_stats = traditional_team_entry
-                    assign_all_values(traditional_team_entry, team)
-
-                    # Create advanced stats entry for this team
-                    advanced_team_entry = GameAdvancedStats()
-                    team_game.advanced_stats = advanced_team_entry
-                    assign_all_values(advanced_team_entry, teams_advanced.loc[team_id])
-
-                    # Create rotation data
-                    team_rotation_data = game_rotation.home_team.data if team_game.home else game_rotation.away_team.data
-                    assign_rotation_data(team_rotation_data, team_game)
 
                 # Save game
                 game.save()

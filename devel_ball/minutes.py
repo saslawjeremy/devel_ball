@@ -18,7 +18,7 @@ class TeamMemberData(object):
     most_recent_player_season_date = attr.ib(default=None)  # The most recent PlayerSeasonDate, which would be
                                                             # the same one as the current game if this player
                                                             # plays in it, otherwise it's their previous game
-    mins_recent_first = attr.ib(default=None)  # The player's recent minutes as a list with most recent first
+    mins_recent_first = attr.ib(default=attr.Factory(list))  # The player's recent minutes as a list with most recent first
     mins_recent_weighted_average = attr.ib(default=0.0)  # The weighted average used to measure recent minutes played
     mins_average = attr.ib(default=0.0)  # The player's average minutes per game
     mins_metric = attr.ib(default=0.0)  # The metric used that combines recent and average statistics
@@ -26,7 +26,7 @@ class TeamMemberData(object):
                                                  # this upcoming game
 
 
-def get_team_game_min_predictions(team_members, number_players_playing, rotation_stats, debug=True):
+def get_team_game_min_predictions(team_members, number_players_playing, rotation_stats, debug=False):
     """
     Predict each player's minutes to be played in this game. This prediction is invariant of which
     player we're actually predicting for at the time, because we are predicting the full team's minutes
@@ -53,12 +53,13 @@ def get_team_game_min_predictions(team_members, number_players_playing, rotation
             "{:20s} {:10s} {:3s}    {:5s}   {:5s}   {:5s}  {}"
             .format('Player', '', 'Out', '#', 'Rec', 'Avg', 'Last games')
         )
-        print('{}'.format('-'*130))
+        print('\n{}'.format('-'*130))
         for team_member_id, team_member_data in sorted_team_members.items():
+            player_object = Player.objects(pk=team_member_id).first()
             print(
-                "{:20s} {:10s} {:3s}    {:5s}   {:5s}   {:5s}  {}"
+                "{:22s} {:10s} {:3s}    {:5s}   {:5s}   {:5s}  {}"
                 .format(
-                    Player.objects(pk=team_member_id).first().name,
+                    player_object.name if player_object else team_member_id,
                     "Inactive" if team_member_data.inactive else "",
                     str(team_member_data.games_missed_recently),
                     str(round(team_member_data.mins_metric, 2)),
@@ -68,15 +69,38 @@ def get_team_game_min_predictions(team_members, number_players_playing, rotation
                 )
             )
 
-    import IPython; IPython.embed()
-
-
-
-
+    ### Temp solution to take sum of top number players playing and normalize ###
+    sorted_team_members_playing = {
+        player_id: player_data for player_id, player_data in sorted_team_members.items()
+        if not player_data.inactive
+    }
+    sum_top_players = sum(
+        sorted_team_members_playing[p].mins_metric for p in list(sorted_team_members_playing.keys())[:number_players_playing]
+    )
+    def get_multiplier(games_missed):
+        if games_missed >= 5:
+            return 0.9
+        return 1.0
+    # Take the min of the derived value, the player's recent max, and a global max
+    player_map = {
+        player_id: min(
+            240.0 * (
+                get_multiplier(player_data.games_missed_recently) *
+                player_data.mins_metric / sum_top_players
+            ),
+            # Add the 0.0 in case t's an otherwise empty sequence
+            max([min_recent for min_recent in player_data.mins_recent_first if min_recent] + [0.0]),
+            36
+        )
+        if i < number_players_playing else 0.0
+        for i, (player_id, player_data) in enumerate(sorted_team_members_playing.items())
+    }
+    return player_map
+    ################################################################################
 
 
 def get_min_predictions(
-    data_inputs, data_accounting, recent_lag=10, recent_to_be_considered=3, average_to_recent_ratio=0.5
+    data_inputs, data_accounting, recent_lag=3, recent_to_be_considered=3, average_to_recent_ratio=0.5
 ):
     """
     Predict minutes played for a given game for each given player.
@@ -100,6 +124,7 @@ def get_min_predictions(
     player_id_and_year_to_player_season = {}
     team_id_and_year_to_team_season = {}
     team_id_and_date_to_rotation_stats = {}
+    team_id_and_game_id_to_predictions = {}
 
     # Iterate over all rows and predict for each one
     for player_index, player_game in data.iterrows():
@@ -214,29 +239,18 @@ def get_min_predictions(
         # Predict minutes per player for this team in this game. These values are calculate per team-game, so
         # we can cache the results since the results apply regardless of who we're looking at.
         # if player_game.DATE >= '2022-01-03':
-        if player_game.TEAM_ID == '1610612766':
-            get_team_game_min_predictions(
+        # if player_game.TEAM_ID == '1610612766':
+        if (player_game.GAME_ID, player_game.TEAM_ID) not in team_id_and_game_id_to_predictions:
+            team_id_and_game_id_to_predictions[
+                (player_game.GAME_ID, player_game.TEAM_ID)
+            ] = get_team_game_min_predictions(
                 team_members=team_members,
                 number_players_playing=number_players_playing,
                 rotation_stats=rotation_stats,
             )
-
-        # Get the top players playing in the game
-        # players_playing = sorted(team_member_recents, key=team_member_recents.get, reverse=True)[:number_players_playing]
-        # Get the total number of minutes these guys plays
-        # sum_players_playing = sum(
-        #     team_member_recents[player_playing] * 0.5 + team_member_averages[player_playing] * 0.5
-        # for player_playing in players_playing)
-        # Simple assumption for now (no injuries), just normalize over 240
-        # not_none_recents = (m for m in team_member_id_to_most_recent_season_date[player_game.PLAYER_ID].stats.recent.MIN_RECENT_FIRST if m)
-        # weighted_average = team_member_recents[player_game.PLAYER_ID] * 0.5 + team_member_averages[player_game.PLAYER_ID] * 0.5
-        # min_prediction = min(
-        #     240.0 * (weighted_average / sum_players_playing),
-        #     max(not_none_recents),
-        #     37.0
-        # ) if not_none_recents else 0.0
-        # data.at[player_index, 'MIN_PREDICTION'] = min_prediction
-
+        data.at[player_index, 'MIN_PREDICTION'] = team_id_and_game_id_to_predictions[
+            (player_game.GAME_ID, player_game.TEAM_ID)
+        ][player_game.PLAYER_ID]
 
 
         ### TODO ###
@@ -254,7 +268,6 @@ def get_min_predictions(
         # 6) When calculating a recent stat, if game is a blowout.. maybe don't count the game or count it less?
         #    A dude that plays 30 mins in a 30 point game isn't really indicative of his minutes in next game
         # 7) Need to figure out how to minimize contributions of lowly dudes. If random dude X plays 1 recent game
-        #    and sits the rest and plays 30 mins in that game, and another does the same, we have 2 dudes who are
         #    gonna show up in recents with 30 mins each for recent and will skew the average away from the guys
         #    who matter.
         #       - The trouble in resolving this is a lot of thoughts involve differentiating between a dude like
@@ -276,8 +289,6 @@ def get_min_predictions(
         #         - Probably still apply some down percentage on guys who were out for a while (first game back)
         # 11) KEY!! More generally, I think I need to factor in average to recent as well (maybe weighted average).
         #     I can use this to downrank guys who had random high min games but overall rarely play that much.
-        # 12) How to differentiate did not dress vs. didn't play. Terry + PJ in 2021 started off with some bad
-        #     examples.
         ############
 
 
