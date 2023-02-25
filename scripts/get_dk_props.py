@@ -119,7 +119,7 @@ def get_gametime(todayOrTomorrow, time):
     amOrPm = 'AM' if 'AM' in time else 'PM'
     timeNumber = time.split(amOrPm)[0]
     hour = int(timeNumber.split(':')[0])
-    if amOrPm == 'PM':
+    if amOrPm == 'PM' and hour != 12:
         hour += 12
     mins = int(timeNumber.split(':')[1])
     gametime = datetime(date.year, date.month, date.day, hour, mins)

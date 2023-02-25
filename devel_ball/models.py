@@ -16,6 +16,7 @@ class Player(Document):
     """  NBA Player representation. """
     unique_id = StringField(primary_key=True)
     name = StringField()
+    position = StringField()
     years = DictField(ListField())  # Key is season (str), mapping to an ordered
                                     # list of games in that season
 

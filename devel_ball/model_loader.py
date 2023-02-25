@@ -16,7 +16,6 @@ from colorama import (
 import socket
 
 from nba_api.stats.endpoints import (
-    leaguedashplayerstats,
     scoreboardv2,
     boxscoresummaryv2,
     boxscoretraditionalv2,
@@ -92,6 +91,15 @@ def add_entry_to_db(document_type, unique_id, name, year, game_id):
     else:
         entry = document_type(unique_id=unique_id)
         entry.name = name
+        # TEST THIS JEREMY
+        raise Exception
+        if document_type == Player:
+            player_doc = query_nba_api(
+                commonplayerinfo.CommonPlayerInfo, player_id=unique_id
+            )
+            entry.position = player_doc.common_player_info.data['data'][0][
+                player_doc.common_player_info.data['headers'].index('POSITION')
+            ]
 
     # Add year to list of years if it doesn't exist yet
     if year not in entry.years:
@@ -487,7 +495,7 @@ def get_games(years):
                         unique_id=player_id,
                         name=player_name,
                         year=year,
-                        game_id=game_id
+                        game_id=game_id,
                     )
 
                     # Create PlayerGame entry to add to this game
