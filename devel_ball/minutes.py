@@ -3,6 +3,11 @@ import bisect
 import attr
 import numpy as np
 from copy import deepcopy
+from colorama import (
+    Fore,
+    Back,
+    Style,
+)
 
 from devel_ball.models import (
     Game,
@@ -10,6 +15,13 @@ from devel_ball.models import (
     PlayerSeason,
     Player,
 )
+
+
+
+# 1) Remove all inactive players first, before adjusting for each one that was removed
+# 2) smarter maxes, initial max of 36 but then allow guys to be higher based on circumstance
+# 3) return back to adjusting for guys who are out
+
 
 
 @attr.s
@@ -34,13 +46,25 @@ class TeamMemberData(object):
         return np.isclose(self.mins_metric, self.max_mins_allowed)
 
     def first_position(self):
+        if self.player_position is None:
+            return None
         return self.player_position.split('-')[0] if '-' in self.player_position else self.player_position
 
     def second_position(self):
+        if self.player_position is None:
+            return None
         return self.player_position.split('-')[1] if '-' in self.player_position else self.player_position
 
 
-def get_sorted_team_members(player_id_to_player_data, max_games_missed=3):
+@attr.s
+class MinsWithWithout(object):
+    """ Used to track minutes a player plays with and without another given player. """
+    mins_with = attr.ib(default=0.0)
+    mins_without = attr.ib(default=0.0)
+    mins_total = attr.ib(default=0.0)
+
+
+def get_sorted_team_members(player_id_to_player_data, max_games_missed=2):
     """
     Sort the map of players by expected minutes to play (using "min_metric"). Also, exclude any
     players that are inactive and have missed more than "max_games_missed".
@@ -80,7 +104,7 @@ def print_team_members(player_id_to_player_data):
             "{:22s} {:6s} {:6s} {:3s}    {:5s}   {:5s}   {:5s}  {}"
         .format('Player', '', '', 'Out', '#', 'Rec', 'Avg', 'Last games')
     )
-    print('\n{}'.format('-'*130))
+    print('{}'.format('-'*130))
     for team_member_id, team_member_data in player_id_to_player_data.items():
         print(
             "{:22s} {:6s} {:6s} {:3s}    {:5s}   {:5s}   {:5s}  {}"
@@ -107,7 +131,7 @@ def get_multiplier(player_data):
     return 1.0
 
 
-def normalize_player_predictions(team_members_remaining, number_players_playing):
+def normalize_player_predictions(team_members_remaining, number_players_playing, hard_max_mins):
     """
     Normalize the top number_players_playing over 240 minutes, and zero predictions for the guys who are not
     expected to be playing.
@@ -118,6 +142,7 @@ def normalize_player_predictions(team_members_remaining, number_players_playing)
 
     :param team_memberes_remaining: map of player_id to TeamMemberData for each player
     :param number_players_paying: the number of guys who are expected to play in the game
+    :param hard_max_mins: the hard max on how many minutes a player can reach
     :returns: nothing, but normalizes the predictions in team_members_remaining
     """
     # Get a sum of the top players to play
@@ -141,7 +166,6 @@ def normalize_player_predictions(team_members_remaining, number_players_playing)
 
     # Now, account for our post processing of normalization (the multiplier and the max-ing) creating a net total
     # greater than 240.0 minutes, which is the total we should end up with
-    # TODO (JS): handle edge case of all capped players, otherwise infinite while loop (super edge case)
     while True:
 
         # If at 240 minutes predicted, we're done!
@@ -160,6 +184,13 @@ def normalize_player_predictions(team_members_remaining, number_players_playing)
                 sum_capped_players += team_member_data.mins_metric
             else:
                 sum_not_capped_players += team_member_data.mins_metric
+
+        # If all players have reached a cap, we need to increase the max's to keep getting towards a solution
+        if sum_not_capped_players == 0:
+            for team_member_data in team_members_remaining.values():
+                team_member_data.max_mins_allowed = min(team_member_data.max_mins_allowed * 1.05, hard_max_mins)
+            sum_not_capped_players = sum_capped_players
+            sum_capped_players = 0
 
         # Re-normalize non-capped players relative to the non-capped minutes remaining. Don't re-apply the
         # multiplier here, since it was already applied once before.
@@ -218,7 +249,7 @@ def find_player_to_add(players_to_consider, inactive_player_data):
     return players_to_consider[0]
 
 
-def update_lineup_for_inactive_player(
+def update_active_players_for_inactive_player(
     team_members_remaining, number_players_playing, inactive_player_data, original_team_members
 ):
     """
@@ -234,24 +265,231 @@ def update_lineup_for_inactive_player(
     # If there are no extra players left to add, delete the inactive guy and move on
     if len(team_members_remaining) <= number_players_playing:
         del team_members_remaining[inactive_player_data.player_id]
-        return
+        return team_members_remaining
 
-    # Else, consider the players who aren't already marked as playing, and then delete the inactive player
-    # from the team_members_remaining
+    # Else, consider the players who aren't already marked as playing who aren't inactive, and then delete the
+    # inactive player from the team_members_remaining
     players_to_consider = list(team_members_remaining.values())[number_players_playing:]
     del team_members_remaining[inactive_player_data.player_id]
 
     # Find the right player to add to the lineup
     player_to_add = find_player_to_add(players_to_consider, inactive_player_data)
 
-    # For now, just add the guy to the lineup with his original mins_metric
+    # For now, just add the guy to the lineup with his original mins_metric, but at least 1.0 mins to bound it
     team_members_remaining[
         player_to_add.player_id
-    ].mins_metric = original_team_members[player_to_add.player_id].mins_metric
+    ].mins_metric = max(
+        min(
+            original_team_members[player_to_add.player_id].mins_metric,
+            original_team_members[player_to_add.player_id].max_mins_allowed,
+        ),
+        1.0
+    )
+
+    # Need to re-sort since the "next" guy available may not be the one we added.
+    return get_sorted_team_members(team_members_remaining)
+
+
+def get_relationship_map(team_member_ids_playing, rotation_stats, inactive_player_id):
+    """
+    Get a map of player_id of guy playing, to "MinsWithWithout" metrics on that player's relationship to
+    the inactive player.
+
+    :param team_member_ids_playing: a list of the team member id's who are playing
+    :param rotation_stats: the rotation stats for this game
+    :param inactive_player_id: the player id of the inactive player
+
+    :returns: a map of player_id to MinsWithWithout for each guy playing in the game
+    """
+
+    relationship_map = {player_id: MinsWithWithout() for player_id in team_member_ids_playing}
+
+    # Strategy 1: Consider only "fully" valid lineups, proportion of minutes based on other guy's minutes played
+    """
+    # Iterate through all rotations
+    for rotation_ids, rotation_mins in rotation_stats.items():
+        inactive_in_lineup = False
+        all_players_valid = True
+        for player_id in rotation_ids:
+            if player_id == inactive_player_id:
+                inactive_in_lineup = True
+            elif player_id not in relationship_map:
+                all_players_valid = False
+                break
+        if not all_players_valid:
+            continue
+
+        # Valid lineup (either with or without inactive dude)
+        for player_id in rotation_ids:
+            if inactive_in_lineup and player_id != inactive_player_id:
+                relationship_map[player_id].mins_with += rotation_mins
+                relationship_map[player_id].mins_total += rotation_mins
+            elif not inactive_in_lineup:
+                relationship_map[player_id].mins_without += rotation_mins
+                relationship_map[player_id].mins_total += rotation_mins
+    """
+
+    # Strategy 2: Proportion of minutes based on other guy's minutes played
+    """
+    for rotation_ids, rotation_mins in rotation_stats.items():
+        inactive_in_lineup = inactive_player_id in rotation_ids
+        for player_id in rotation_ids:
+            if player_id in relationship_map:
+                if inactive_in_lineup:
+                    relationship_map[player_id].mins_with += rotation_mins
+                else:
+                    relationship_map[player_id].mins_without += rotation_mins
+                relationship_map[player_id].mins_total += rotation_mins
+    """
+
+    # Strategy 3: Proportion of minutes based on inactive guy's minutes played
+    for rotation_ids, rotation_mins in rotation_stats.items():
+        if inactive_player_id not in rotation_ids:
+            continue
+        for other_player_id, other_player_relationship in relationship_map.items():
+            if other_player_id in rotation_ids:
+                other_player_relationship.mins_with += rotation_mins
+            else:
+                other_player_relationship.mins_without += rotation_mins
+            other_player_relationship.mins_total += rotation_mins
+
+    return relationship_map
+
+
+def get_replacement_tiers(team_members_data, inactive_player_data):
+    """
+    Put the other players in buckets of if they match the inactive player
+
+    By 1st priority:
+     - position 1 matches position 1
+    By 2nd priority:
+     - position 1 matches position 2
+     - position 2 matches position 2
+    By 3rd priority:
+     - position 2 matches position 2
+    By 4th priority:
+     - no position matches
+
+    :param team_member_data: a list of TeamMemberData for other players to consider
+    :param inactive_player_data: the TeamMemberData for the inactive player
+
+    :returns: a list of 4 lists, according to the above tier structure
+    """
+    tiers = [[], [], [], []]
+    for team_member_data in team_members_data:
+        if inactive_player_data.first_position() == team_member_data.first_position():
+            tiers[0].append(team_member_data)
+        elif inactive_player_data.first_position() == team_member_data.second_position():
+            tiers[1].append(team_member_data)
+        elif inactive_player_data.second_position() == team_member_data.first_position():
+            tiers[1].append(team_member_data)
+        elif inactive_player_data.second_position() == team_member_data.second_position():
+            tiers[2].append(team_member_data)
+        else:
+            tiers[3].append(team_member_data)
+    return tiers
+
+
+def update_player_mins_for_inactive_player(
+    team_members_remaining, inactive_player_data, number_players_playing, rotation_stats, max_bump=1.5,
+):
+    """
+    Update "team_members_remaining" based on the player being out described by "inactive_player_data".
+
+    :param team_members_remaining: map of player id to TeamMemberData of guys still remaining
+    :param inactive_player_data: TeamMemberData for the player who is out
+    :param number_players_playing: int for how many players should be marked as playing
+    :param rotation_stats: the team's RotationStats going into this game
+    :param max_bump: the largest multiplier of minutes to bump a candidate replacement for the inactive player, for
+        example a "max_bump" of 1.5 and a "mins_metric" of 12 means that player can only be allocated up to
+        18 minutes in this step.
+
+    :returns: an updated "team_members_remaining" with adjusted minutes
+    """
+
+    print(Back.RED + "Without      {} ({})".format(inactive_player_data.player_name, inactive_player_data.player_position) + Style.RESET_ALL)
+
+    # TODO (JS): This should probably take all the players, since some of the math is looking for full lineups
+    relationship_map = get_relationship_map(
+        list(team_members_remaining.keys())[:number_players_playing], rotation_stats, inactive_player_data.player_id
+    )
+
+    # Get a list of 4 lists that puts the potential replacement players into tiers of priority to replace
+    # the inactive guy, prioritized by positional matches
+    replacement_tiers = get_replacement_tiers(
+        list(team_members_remaining.values())[:number_players_playing], inactive_player_data
+    )
+
+    @attr.s
+    class ReplacementMetrics(object):
+        # Max mins for the replacement, by considering:
+        #  - The global max this player is allowed
+        #  - The current estimate for this player * "max_bump"
+        max_mins = attr.ib()
+        # The difference between the player who's out minutes expected, and the replacement's minutes expected
+        mins_difference = attr.ib()
+        # The percentage of minutes the replacement played without the injured player on the court
+        mins_without_percentage = attr.ib()
+        # An arbitrary heuristic at how much weighting to give to this replacement option. This is used by
+        # summing all replacement options, and checking for each player's contribution to it, correpsonding to
+        # their relevance as a replacement option.
+        replacement_value = attr.ib(default=0.0)
+
+        # TODO (JS): Play with this calculation for tuning
+        def __attrs_post_init__(self):
+            self.replacement_value = np.interp(self.mins_difference, (0, 20), (1.0, 0.1)) * np.interp(
+                self.mins_without_percentage, (0.2, 0.9), (0.4, 0.6)
+            )
+
+    # TODO (JS): Maybe increase the max of mins allowed for groups 1-2-3 before applying to 4?
+
+    # Go tier by tier, until all minutes that are expected to be made up, are allocated elsewhere
+    mins_left = inactive_player_data.mins_metric
+    for replacement_tier in replacement_tiers:
+        # If there's no more minutes to distribute, we're done
+        if mins_left <= 0.0:
+            continue
+
+        # Gather the stats on the potental replacements
+        replacements_metrics = {
+            replacement.player_id: ReplacementMetrics(
+                max_mins=min(replacement.max_mins_allowed, replacement.mins_metric * max_bump),
+                mins_difference=np.abs(replacement.mins_metric - inactive_player_data.mins_metric),
+                mins_without_percentage=
+                    relationship_map[replacement.player_id].mins_without/
+                        relationship_map[replacement.player_id].mins_total
+                        if relationship_map[replacement.player_id].mins_total > 0 else 0.0,
+            ) for replacement in replacement_tier
+        }
+
+        still_going = True
+        while not np.isclose(mins_left, 0.0) and mins_left > 0.0 and still_going:
+            total_replacement_value = sum(
+                replacement_metrics.replacement_value
+                for replacement_id, replacement_metrics in replacements_metrics.items()
+                if not np.isclose(team_members_remaining[replacement_id].mins_metric, replacement_metrics.max_mins)
+            )
+
+            still_going = False
+            for replacement_id, replacement_metrics in replacements_metrics.items():
+                replacement_data = team_members_remaining[replacement_id]
+                if np.isclose(replacement_data.mins_metric, replacement_metrics.max_mins):
+                    continue
+                still_going = True
+                new_mins = min(
+                    replacement_metrics.max_mins,
+                    replacement_data.mins_metric + mins_left * (
+                        replacement_metrics.replacement_value / total_replacement_value
+                    )
+                )
+                mins_left -= (new_mins - replacement_data.mins_metric)
+                replacement_data.mins_metric = new_mins
+
+    return get_sorted_team_members(team_members_remaining)
 
 
 def get_team_game_min_predictions(
-    team_members, number_players_playing, rotation_stats, max_player_mins=36.0, debug=True
+    team_members, number_players_playing, rotation_stats, max_player_mins=36.0, hard_max_mins=40.0, debug=True
 ):
     """
     Predict each player's minutes to be played in this game. This prediction is invariant of which
@@ -261,249 +499,76 @@ def get_team_game_min_predictions(
     :param team_members: A mapping of each team member on the team, to their TeamMemberData
     :param number_players_playing: The expectation of how many players this team will play in the game
     :param rotation_stats: The team's rotation stats up until this point in the season
-    :param max_player_mins: The max minutes to allow for a player to be predicted for
+    :param max_player_mins: The max minutes to nominally allow for a player to be predicted for
+    :param hard_max_mins: The hard max on minutes a player will ever be allowed to reach
     :returns: A mapping of each player to the minutes they're predicted to play in this game
     """
 
     sorted_team_members = get_sorted_team_members(team_members)
     if debug:
+        print(Back.RED + "Original" + Style.RESET_ALL + "\n")
         print_team_members(sorted_team_members)
 
-    # Update TeamMemberData for max allowable player minutes between a globa max, and the max of their recent games
+    # Update TeamMemberData for max allowable player minutes between a globa max, and the max of their recent games.
+    # Ensure the value is at minimum 1.0
     for player_id, player_data in sorted_team_members.items():
-        player_data.max_mins_allowed = min(
-            max_player_mins,
-            # Add the 0.0 in case it's an otherwise empty sequence
-            max([min_recent for min_recent in player_data.mins_recent_first if min_recent] + [0.0]),
+        player_data.max_mins_allowed = max(
+            min(
+                # TODO (JS): Consider making this a "soft max", with a higher "hard max". Where the soft
+                # max can be surpassed if say the average of last 10 is above it or something like that.
+                # Like D Fox was having absurdly high recent #s, so shouldn't cap him at 36. Another example could
+                # be if a guy's last game was absurdly high, or something. Maybe even on a back to back, you limit the
+                # max a bit more (give them a hit in the multiplier calculation).
+                max_player_mins,
+                # Add the 0.0 in case it's an otherwise empty sequence
+                # TODO (JS): Consider maybe 2nd max? 1st may be an outlier
+                max([min_recent for min_recent in player_data.mins_recent_first if min_recent] + [0.0]),
+            ),
+            1.0
         )
 
-    # Iterate forever until the top number_players_playing includes no inactive players
+    # Normalize the top number_players_playing over 240 minutes, and zero predictions for the guys who are not
+    # predicted to be playing. Note within the top "number_players_playing", inactive players may still remain,
+    # but any players not in the top "number_players_playing" who are inactive, are removed at this time.
     team_members_remaining = deepcopy(sorted_team_members)
+    normalize_player_predictions(team_members_remaining, number_players_playing, hard_max_mins)
+    team_members_remaining = {
+        player: player_data for i, (player, player_data) in enumerate(team_members_remaining.items())
+        if i < number_players_playing or not player_data.inactive
+    }
 
+    # TODO (JS): Go through helpers and test/tune any parameters of interest. If parameters truly change stuff,
+    # then expose them to higher level caller to pass in.
+
+    # Pull out all the inactive players, and replace them
+    inactive_players = []
     while True:
 
-        # Normalize the top number_players_playing over 240 minutes, and zero predictions for the guys who are not
-        # predicted to be playing. Note inactive players who remain so far, are not removed in this step.
-        normalize_player_predictions(team_members_remaining, number_players_playing)
-
-        print_team_members(team_members_remaining)
-
         # Find the first inactive player, sorted by most expected minutes. If the player is beyond the guys
-        # expected to be playing, then we're done!
+        # expected to be playing, then this step is done.
         inactive_player_data = get_inactive_player_data(team_members_remaining, number_players_playing)
         if inactive_player_data is None:
             break
+        inactive_players.append(inactive_player_data)
 
         # Update players playing based on the inactive guy
-        update_lineup_for_inactive_player(
+        team_members_remaining = update_active_players_for_inactive_player(
             team_members_remaining, number_players_playing, inactive_player_data, sorted_team_members
         )
 
-        # After the loop, re-sort the list of guys based on changes that may have happened
-        team_members_remaining = get_sorted_team_members(team_members_remaining)
-        print_team_members(team_members_remaining)
-
-        import IPython; IPython.embed()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-        @attr.s
-        class MinsWithWithout(object):
-            mins_with = attr.ib(default=0.0)
-            mins_without = attr.ib(default=0.0)
-            mins_total = attr.ib(default=0.0)
-
-        # Get the player ids of the current guys to be playing, which we'll map to minutes with and without
-        # the inactive player
-        guys_playing = {
-            player_id: MinsWithWithout() for player_id in list(team_members_remaining.keys())[:number_players_playing]
-        }
-
-        # Iterate through all lineups
-        for rotation_ids, rotation_mins in rotation_stats.items():
-            inactive_in_lineup = False
-            all_players_valid = True
-            for player_id in rotation_ids:
-                if player_id == inactive_player_id:
-                    inactive_in_lineup = True
-                    continue
-                elif player_id not in guys_playing:
-                    all_players_valid = False
-                    break
-            if not all_players_valid:
-                continue
-
-            # Valid lineup (either with or without inactive dude)
-            for player_id in rotation_ids:
-                if inactive_in_lineup and player_id != inactive_player_id:
-                    guys_playing[player_id].mins_with += rotation_mins
-                    guys_playing[player_id].mins_total += rotation_mins
-                elif not inactive_in_lineup:
-                    guys_playing[player_id].mins_without += rotation_mins
-                    guys_playing[player_id].mins_total += rotation_mins
-
-        # TODO (JS): I AM HERE!! USE THIS TO DEBUG:
-        print_debug()
-        print("\n\n\nWithout      {} ({})\n".format(inactive_player.name, inactive_player.position))
-        print("{:20s} {:8s} {:8s} {:10s}".format("Player", "With", "Without", "% Without"))
-        for guy_playing_id, mins in guys_playing.items():
-            player = Player.objects(pk=guy_playing_id).first()
-            print("{:20s} {:8s} {:8s} {:10s} {}".format(player.name, str(round(mins.mins_with, 2)), str(round(mins.mins_without, 2)), str(round(mins.mins_without/mins.mins_total, 2) if mins.mins_total > 0 else 0), player.position))
-        print("\n\n")
-        ###########################################
-
-        # Normalize each player relative to their expectation going into the game. If they've played less
-        # than 10% of the relevant minutes of the most guy, assume the data is insufficient and go with a
-        # standard default ratio
-        most_mins_for_a_guy = max(guys_playing, key=lambda guy: guys_playing[guy].mins_total)
-        for guy_playing_id, mins in guys_playing.items():
-            expected_before_injury = sorted_team_members[guy_playing_id].mins_metric
-
-        import IPython; IPython.embed()
-        team_members_remaining = get_sorted_team_members(team_members_remaining)
-        continue
-
-        # Multiple the right column % by their expected minutes going in
-
-        # Look at each other player and how many minutes they play with the inactive player, and figure out
-        # a heuristic for how many more minutes they'll play without him
-        extra_mins_map = {}
-        for team_member_id, team_member_data in team_members_remaining.items():
-            mins_with = total_mins = 0
-            for lineup, lineup_mins in rotation_stats.items():
-                if team_member_id in lineup:
-                    total_mins += lineup_mins
-                    if inactive_player_id in lineup:
-                        mins_with += lineup_mins
-            extra_mins_map[team_member_id] = (
-                np.interp(mins_with/total_mins, (0.5, 0.75), (0.5, 0.0)) if total_mins > 0 else 0.5
-            ) * team_member_data.mins_metric
-
-        import IPython; IPython.embed()
-        total_extra_mins = sum(extra_mins_map.values())
-        for player_id, raw_extra_mins in extra_mins_map.items():
-            player_data = team_members_remaining[player_id]
-            extra_mins = inactive_mins_to_makeup * (raw_extra_mins / total_extra_mins)
-            if extra_mins > (max_player_mins_map[player_id] - player_data.mins_metric):
-                extra_mins = max_player_mins_map[player_id] - player_data.mins_metric
-            player_data.mins_metric += extra_mins
-            inactive_mins_to_makeup -= extra_mins
-            total_extra_mins -= raw_extra_mins
+        # Re-sort the list of players based on the new guy that was added
         team_members_remaining = get_sorted_team_members(team_members_remaining)
 
+    # Go through the inactives, and apply their minutes to others in the rotation
+    for inactive_player in inactive_players:
 
-
-    return {player_id: 0.0 for player_id in team_members_remaining.keys()}
-
-    # TODO (JS): there still may be inactive guys if there's not enough totals
-    import IPython; IPython.embed()
-
-    # TODO (JS): my issue now is I'm giving too much to the shit players
-
-
-
-    """ BELOW HERE IS TRASH FOR NOW, FIX ABOVE """
-
-
-    ### Attempt ###
-    team_members_remaining = deepcopy(sorted_team_members)
-    # Iterate "forever" until the top number_players_playing includes no inactive players
-    # TODO (JS): consider just ignoring guys who haven't played in >X games (i.e. more than 2 games), they'll effectively
-    #            already be taken care of by the recent mins of other guys
-    # TODO (JS): there's an issue here with current implementation because if a dude who plays 2 MINpg is inactive, I'm
-    #            currently gonna probably multiple by the top guy by 1.99 (no shared minutes). I need to scale this by
-    #            the amount of minutes the guy actually plays that's missing somehow
-    # TODO (JS): I need to find a way to apply dame's 36 minutes as 36 minutes, not arbitrary factors that create fake
-    #            minutes for scrubs
-    while True:
-        # Find the first player sorted by most expected minutes to be inactive
-        inactive_player_id = inactive_player_index = inactive_player_data = None
-        for candidate_team_member_index, (candidate_team_member_id, candidate_team_member_data) in enumerate(
-            team_members_remaining.items()
-        ):
-            if candidate_team_member_data.inactive:
-                inactive_player_id = candidate_team_member_id
-                inactive_player_index = candidate_team_member_index
-                inactive_player_data = candidate_team_member_data
-                break
-        # If we've found enough active players, or there are no more inactive players
-        if inactive_player_index is None or inactive_player_index >= number_players_playing:
-            break
-        # Look at each other player and how many minutes they play with the inactive player, and update
-        extra_mins_map = {}
-        players_adjusted_for = 0
-        for team_member_id, team_member_data in team_members_remaining.items():
-            # Ignore the inactive player himself
-            if team_member_id == inactive_player_id or team_member_data.inactive or players_adjusted_for >= number_players_playing:
-                continue
-            mins_with = total_mins = 0
-            for lineup, lineup_mins in rotation_stats.items():
-                if team_member_id in lineup:
-                    total_mins += lineup_mins
-                    if inactive_player_id in lineup:
-                        mins_with += lineup_mins
-            # Map from 50% of minutes shared to 50% bump in mins, to 75% of minutes shared to 0% bump
-            extra_mins_map[team_member_id] = (
-                np.interp(mins_with/total_mins, (0.5, 0.85), (0.5, 0.1)) if total_mins > 0 else 0.5
-            ) * team_member_data.mins_metric
-            players_adjusted_for += 1
-            # team_member_data.mins_metric *= (1 + (1.0 - (mins_with/total_mins if total_mins > 0.0 else 0.0)))
-        # Remove the inactive player now
-        del team_members_remaining[inactive_player_id]
-        total_extra_mins = sum(extra_mins_map.values())
-        # TODO (JS): Do I wanna keep this intermediately?
-        for other_player_id, other_player_extra_mins in extra_mins_map.items():
-            team_members_remaining[other_player_id].mins_metric += (other_player_extra_mins / total_extra_mins) * inactive_player_data.mins_metric
-        team_members_remaining = get_sorted_team_members(team_members_remaining)
-
-    # It's possible there wasn't enough active players relative to number_players_playing, so I need to ensure all
-    # inactive players are removed at this point
-    team_members_remaining = {
-        team_member_id: team_member_data for team_member_id, team_member_data in team_members_remaining.items()
-        if not team_member_data.inactive
-    }
-
-    # Get a sum of the top players to play
-    sum_top_players = sum(
-        team_members_remaining[p].mins_metric for p in list(team_members_remaining.keys())[:number_players_playing]
-    )
-
-    # Create a multiplier based on recent games missed
-    def get_multiplier(games_missed):
-        if games_missed >= 5:
-            return 0.9
-        return 1.0
-
-    # TODO (JS): I need to make sure my final result adds up to 240, which the maxing doesn't hold now
-
-    # Take the min of the derived value, the player's recent max, and a global max
-    player_map = {
-        player_id: min(
-            240.0 * (
-                get_multiplier(player_data.games_missed_recently) *
-                player_data.mins_metric / sum_top_players
-            ),
-            # Add the 0.0 in case t's an otherwise empty sequence
-            max([min_recent for min_recent in player_data.mins_recent_first if min_recent] + [0.0]),
-            36
+        # Intelligently update the other players in the lineup based on the inactive player
+        # TODO (JS): Test strategy 1-3 for "get_relationship_map"
+        team_members_remaining = update_player_mins_for_inactive_player(
+            team_members_remaining, inactive_player, number_players_playing, rotation_stats
         )
-        if i < number_players_playing else 0.0
-        for i, (player_id, player_data) in enumerate(team_members_remaining.items())
-    }
 
-    return player_map
+    return {player_id: data.mins_metric for player_id, data in team_members_remaining.items()}
 
 
 def get_min_predictions(
@@ -534,7 +599,8 @@ def get_min_predictions(
     team_id_and_date_to_rotation_stats = {}
     team_id_and_game_id_to_predictions = {}
 
-    data = data.sample(frac=1)
+    # Randomize
+    # data = data.sample(frac=1)
 
     # Iterate over all rows and predict for each one
     for player_index, player_game in data.iterrows():
@@ -681,20 +747,20 @@ def get_min_predictions(
 
         # Predict minutes per player for this team in this game. These values are calculate per team-game, so
         # we can cache the results since the results apply regardless of who we're looking at.
-        if player_game.DATE >= '2022-01-03':
+        # if player_game.DATE <= '2022-01-03':
         # if player_game.TEAM_ID == '1610612766':
-            print("DATE: {}\n\n".format(player_game.DATE))
-            if (player_game.GAME_ID, player_game.TEAM_ID) not in team_id_and_game_id_to_predictions:
-                team_id_and_game_id_to_predictions[
-                    (player_game.GAME_ID, player_game.TEAM_ID)
-                ] = get_team_game_min_predictions(
-                    team_members=team_members,
-                    number_players_playing=number_players_playing,
-                    rotation_stats=rotation_stats,
-                )
-            data.at[player_index, 'MIN_PREDICTION'] = team_id_and_game_id_to_predictions[
+        print("\n\n" + Back.GREEN + Fore.BLACK + "DATE: {}".format(player_game.DATE) + Style.RESET_ALL + "\n\n")
+        if (player_game.GAME_ID, player_game.TEAM_ID) not in team_id_and_game_id_to_predictions:
+            team_id_and_game_id_to_predictions[
                 (player_game.GAME_ID, player_game.TEAM_ID)
-            ][player_game.PLAYER_ID]
+            ] = get_team_game_min_predictions(
+                team_members=team_members,
+                number_players_playing=number_players_playing,
+                rotation_stats=rotation_stats,
+            )
+        data.at[player_index, 'MIN_PREDICTION'] = team_id_and_game_id_to_predictions[
+            (player_game.GAME_ID, player_game.TEAM_ID)
+        ][player_game.PLAYER_ID]
 
 
         ### TODO ###
