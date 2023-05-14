@@ -3,6 +3,7 @@ import bisect
 import attr
 import numpy as np
 from copy import deepcopy
+from datetime import datetime
 from colorama import (
     Fore,
     Back,
@@ -41,6 +42,7 @@ class TeamMemberData(object):
     games_missed_recently = attr.ib(default=-1)  # How many consecutive games missed from this player going into
                                                  # this upcoming game
     max_mins_allowed = attr.ib(default=-1)  # The max amount of minutes this player is allowed to predicted for this game
+    back_to_back = attr.ib(default=False)  # Whether or not this player is playing on a back to back
 
     def is_capped(self):
         return np.isclose(self.mins_metric, self.max_mins_allowed)
@@ -64,7 +66,7 @@ class MinsWithWithout(object):
     mins_total = attr.ib(default=0.0)
 
 
-def get_sorted_team_members(player_id_to_player_data, max_games_missed=2):
+def get_sorted_team_members(player_id_to_player_data, max_games_missed=0):
     """
     Sort the map of players by expected minutes to play (using "min_metric"). Also, exclude any
     players that are inactive and have missed more than "max_games_missed".
@@ -126,7 +128,7 @@ def get_multiplier(player_data):
     Get a multiplier based on recent games missed. Specifically this is for active players coming
     back from injuries.
     """
-    if not player_data.inactive and player_data.games_missed_recently >= 5:
+    if not player_data.inactive and player_data.games_missed_recently >= 7:
         return 0.9
     return 1.0
 
@@ -275,16 +277,20 @@ def update_active_players_for_inactive_player(
     # Find the right player to add to the lineup
     player_to_add = find_player_to_add(players_to_consider, inactive_player_data)
 
-    # For now, just add the guy to the lineup with his original mins_metric, but at least 1.0 mins to bound it
-    team_members_remaining[
-        player_to_add.player_id
-    ].mins_metric = max(
+    # Just add the guy to the lineup with his original mins_metric, but at least 1.0 mins to bound it
+    new_mins = max(
         min(
             original_team_members[player_to_add.player_id].mins_metric,
             original_team_members[player_to_add.player_id].max_mins_allowed,
         ),
         1.0
     )
+    # Make sure we're not making this guy have more minutes than the inactive guy
+    new_mins = min(new_mins, inactive_player_data.mins_metric)
+    team_members_remaining[player_to_add.player_id].mins_metric = new_mins
+
+    # And subtract the amount we're adding for this
+    inactive_player_data.mins_metric -= new_mins
 
     # Need to re-sort since the "next" guy available may not be the one we added.
     return get_sorted_team_members(team_members_remaining)
@@ -304,8 +310,8 @@ def get_relationship_map(team_member_ids_playing, rotation_stats, inactive_playe
 
     relationship_map = {player_id: MinsWithWithout() for player_id in team_member_ids_playing}
 
-    # Strategy 1: Consider only "fully" valid lineups, proportion of minutes based on other guy's minutes played
     """
+    # Strategy 1: Consider only "fully" valid lineups, proportion of minutes based on other guy's minutes played
     # Iterate through all rotations
     for rotation_ids, rotation_mins in rotation_stats.items():
         inactive_in_lineup = False
@@ -327,10 +333,8 @@ def get_relationship_map(team_member_ids_playing, rotation_stats, inactive_playe
             elif not inactive_in_lineup:
                 relationship_map[player_id].mins_without += rotation_mins
                 relationship_map[player_id].mins_total += rotation_mins
-    """
 
     # Strategy 2: Proportion of minutes based on other guy's minutes played
-    """
     for rotation_ids, rotation_mins in rotation_stats.items():
         inactive_in_lineup = inactive_player_id in rotation_ids
         for player_id in rotation_ids:
@@ -380,18 +384,54 @@ def get_replacement_tiers(team_members_data, inactive_player_data):
         if inactive_player_data.first_position() == team_member_data.first_position():
             tiers[0].append(team_member_data)
         elif inactive_player_data.first_position() == team_member_data.second_position():
-            tiers[1].append(team_member_data)
+            tiers[0].append(team_member_data)
         elif inactive_player_data.second_position() == team_member_data.first_position():
-            tiers[1].append(team_member_data)
+            tiers[0].append(team_member_data)
         elif inactive_player_data.second_position() == team_member_data.second_position():
-            tiers[2].append(team_member_data)
+            tiers[0].append(team_member_data)
         else:
-            tiers[3].append(team_member_data)
+            tiers[0].append(team_member_data)
     return tiers
 
 
+def update_replacements(mins_left, replacements_metrics, team_members_remaining):
+    """
+    Update the replacements minutes based on the inactive player that is out.
+
+    :param mins_left: The amount of minutes left to allocate
+    :param replacements_metrics: A map of player_id to ReplacementMetrics
+    :param team_members_remaining: map of player id to TeamMemberData of guys still remaining
+
+    :returns: The amount of minutes still left after this update
+    """
+    still_going = True
+    while not np.isclose(mins_left, 0.0) and mins_left > 0.0 and still_going:
+        total_replacement_value = sum(
+            replacement_metrics.replacement_value
+            for replacement_id, replacement_metrics in replacements_metrics.items()
+            if not np.isclose(team_members_remaining[replacement_id].mins_metric, replacement_metrics.max_mins)
+        )
+
+        still_going = False
+        for replacement_id, replacement_metrics in replacements_metrics.items():
+            replacement_data = team_members_remaining[replacement_id]
+            if np.isclose(replacement_data.mins_metric, replacement_metrics.max_mins):
+                continue
+            still_going = True
+            new_mins = min(
+                replacement_metrics.max_mins,
+                replacement_data.mins_metric + mins_left * (
+                    replacement_metrics.replacement_value / total_replacement_value
+                )
+            )
+            mins_left -= (new_mins - replacement_data.mins_metric)
+            replacement_data.mins_metric = new_mins
+    return mins_left
+
+
+## TODO (JS): at 2.0, max bump can probably be removed all together
 def update_player_mins_for_inactive_player(
-    team_members_remaining, inactive_player_data, number_players_playing, rotation_stats, max_bump=1.5,
+    team_members_remaining, inactive_player_data, number_players_playing, rotation_stats, hard_max_mins, max_bump=2.0,
 ):
     """
     Update "team_members_remaining" based on the player being out described by "inactive_player_data".
@@ -409,7 +449,6 @@ def update_player_mins_for_inactive_player(
 
     print(Back.RED + "Without      {} ({})".format(inactive_player_data.player_name, inactive_player_data.player_position) + Style.RESET_ALL)
 
-    # TODO (JS): This should probably take all the players, since some of the math is looking for full lineups
     relationship_map = get_relationship_map(
         list(team_members_remaining.keys())[:number_players_playing], rotation_stats, inactive_player_data.player_id
     )
@@ -435,61 +474,51 @@ def update_player_mins_for_inactive_player(
         # their relevance as a replacement option.
         replacement_value = attr.ib(default=0.0)
 
-        # TODO (JS): Play with this calculation for tuning
         def __attrs_post_init__(self):
-            self.replacement_value = np.interp(self.mins_difference, (0, 20), (1.0, 0.1)) * np.interp(
-                self.mins_without_percentage, (0.2, 0.9), (0.4, 0.6)
-            )
+            self.replacement_value = np.interp(self.mins_without_percentage, (0.0, 1.0), (0.01, 0.99))
+            # self.replacement_value = np.interp(self.mins_difference, (0, 20), (1.0, 0.0))
 
-    # TODO (JS): Maybe increase the max of mins allowed for groups 1-2-3 before applying to 4?
-
-    # Go tier by tier, until all minutes that are expected to be made up, are allocated elsewhere
+    # Iterate while there are minutes left to allocate
     mins_left = inactive_player_data.mins_metric
-    for replacement_tier in replacement_tiers:
-        # If there's no more minutes to distribute, we're done
-        if mins_left <= 0.0:
-            continue
+    max_multiplier = 1.0
+    while True:
 
-        # Gather the stats on the potental replacements
-        replacements_metrics = {
-            replacement.player_id: ReplacementMetrics(
-                max_mins=min(replacement.max_mins_allowed, replacement.mins_metric * max_bump),
-                mins_difference=np.abs(replacement.mins_metric - inactive_player_data.mins_metric),
-                mins_without_percentage=
-                    relationship_map[replacement.player_id].mins_without/
-                        relationship_map[replacement.player_id].mins_total
-                        if relationship_map[replacement.player_id].mins_total > 0 else 0.0,
-            ) for replacement in replacement_tier
-        }
+        # Iterate over each tier, applying minutes to players within that tier
+        for replacement_tier in replacement_tiers:
 
-        still_going = True
-        while not np.isclose(mins_left, 0.0) and mins_left > 0.0 and still_going:
-            total_replacement_value = sum(
-                replacement_metrics.replacement_value
-                for replacement_id, replacement_metrics in replacements_metrics.items()
-                if not np.isclose(team_members_remaining[replacement_id].mins_metric, replacement_metrics.max_mins)
-            )
+            # If there's no more minutes to distribute, we're done
+            if np.isclose(mins_left, 0) or mins_left <= 0.0:
+                return get_sorted_team_members(team_members_remaining)
 
-            still_going = False
-            for replacement_id, replacement_metrics in replacements_metrics.items():
-                replacement_data = team_members_remaining[replacement_id]
-                if np.isclose(replacement_data.mins_metric, replacement_metrics.max_mins):
-                    continue
-                still_going = True
-                new_mins = min(
-                    replacement_metrics.max_mins,
-                    replacement_data.mins_metric + mins_left * (
-                        replacement_metrics.replacement_value / total_replacement_value
-                    )
-                )
-                mins_left -= (new_mins - replacement_data.mins_metric)
-                replacement_data.mins_metric = new_mins
+            # Gather the stats on the potental replacements
+            replacements_metrics = {
+                replacement.player_id: ReplacementMetrics(
+                    max_mins=min(
+                        min(replacement.max_mins_allowed, replacement.mins_metric * max_bump) * max_multiplier,
+                        hard_max_mins,
+                    ),
+                    mins_difference=np.abs(replacement.mins_metric - inactive_player_data.mins_metric),
+                    mins_without_percentage=
+                        relationship_map[replacement.player_id].mins_without/
+                            relationship_map[replacement.player_id].mins_total
+                            if relationship_map[replacement.player_id].mins_total > 0 else 0.0,
+                ) for replacement in replacement_tier
+            }
 
-    return get_sorted_team_members(team_members_remaining)
+            # Update the replacements in this tier, keeping track of how many minutes are still left after that
+            mins_left = update_replacements(mins_left, replacements_metrics, team_members_remaining)
 
+        # Allow for higher max's next time around
+        max_multiplier += 0.1
 
 def get_team_game_min_predictions(
-    team_members, number_players_playing, rotation_stats, max_player_mins=36.0, hard_max_mins=40.0, debug=True
+    team_members,
+    number_players_playing,
+    rotation_stats,
+    soft_max_mins=34.0,
+    hard_max_mins=40.0,
+    recent_games_average_exceeds_soft_max=4,
+    debug=True
 ):
     """
     Predict each player's minutes to be played in this game. This prediction is invariant of which
@@ -499,30 +528,36 @@ def get_team_game_min_predictions(
     :param team_members: A mapping of each team member on the team, to their TeamMemberData
     :param number_players_playing: The expectation of how many players this team will play in the game
     :param rotation_stats: The team's rotation stats up until this point in the season
-    :param max_player_mins: The max minutes to nominally allow for a player to be predicted for
+    :param soft_max_mins: The initial max minutes to nominally allow for a player to be predicted for,
+        barring exceptional circumstances to suggest player may exceed this
     :param hard_max_mins: The hard max on minutes a player will ever be allowed to reach
+    :param recent_games_average_exceeds_soft_max: The amount of recent games to average the minutes played in, where
+        if the result is higher than the soft_max_mins, replace the soft_max_mins with this number
     :returns: A mapping of each player to the minutes they're predicted to play in this game
     """
+
+    # TODO (JS): ideas:
+    #  4) Account for OT night before
 
     sorted_team_members = get_sorted_team_members(team_members)
     if debug:
         print(Back.RED + "Original" + Style.RESET_ALL + "\n")
         print_team_members(sorted_team_members)
 
-    # Update TeamMemberData for max allowable player minutes between a globa max, and the max of their recent games.
-    # Ensure the value is at minimum 1.0
+    # Update TeamMemberData for max allowable minutes played (ensuring at least 1.0) by taking the least of:
+    #   1) The maximum of soft_max_mins, and the player's average minutes over a specified recent stretch of games
+    #   2) The maximum this player has played in their recent games
+    #   3) A hard max
     for player_id, player_data in sorted_team_members.items():
         player_data.max_mins_allowed = max(
             min(
-                # TODO (JS): Consider making this a "soft max", with a higher "hard max". Where the soft
-                # max can be surpassed if say the average of last 10 is above it or something like that.
-                # Like D Fox was having absurdly high recent #s, so shouldn't cap him at 36. Another example could
-                # be if a guy's last game was absurdly high, or something. Maybe even on a back to back, you limit the
-                # max a bit more (give them a hit in the multiplier calculation).
-                max_player_mins,
+                max(
+                    soft_max_mins,
+                    np.mean([p for p in player_data.mins_recent_first if p][:recent_games_average_exceeds_soft_max]),
+                ),
                 # Add the 0.0 in case it's an otherwise empty sequence
-                # TODO (JS): Consider maybe 2nd max? 1st may be an outlier
                 max([min_recent for min_recent in player_data.mins_recent_first if min_recent] + [0.0]),
+                hard_max_mins,
             ),
             1.0
         )
@@ -532,10 +567,12 @@ def get_team_game_min_predictions(
     # but any players not in the top "number_players_playing" who are inactive, are removed at this time.
     team_members_remaining = deepcopy(sorted_team_members)
     normalize_player_predictions(team_members_remaining, number_players_playing, hard_max_mins)
-    team_members_remaining = {
-        player: player_data for i, (player, player_data) in enumerate(team_members_remaining.items())
-        if i < number_players_playing or not player_data.inactive
-    }
+    team_members_remaining = get_sorted_team_members(
+        {
+            player: player_data for i, (player, player_data) in enumerate(team_members_remaining.items())
+            if i < number_players_playing or not player_data.inactive
+        }
+    )
 
     # TODO (JS): Go through helpers and test/tune any parameters of interest. If parameters truly change stuff,
     # then expose them to higher level caller to pass in.
@@ -556,31 +593,30 @@ def get_team_game_min_predictions(
             team_members_remaining, number_players_playing, inactive_player_data, sorted_team_members
         )
 
-        # Re-sort the list of players based on the new guy that was added
-        team_members_remaining = get_sorted_team_members(team_members_remaining)
-
     # Go through the inactives, and apply their minutes to others in the rotation
     for inactive_player in inactive_players:
 
         # Intelligently update the other players in the lineup based on the inactive player
-        # TODO (JS): Test strategy 1-3 for "get_relationship_map"
         team_members_remaining = update_player_mins_for_inactive_player(
-            team_members_remaining, inactive_player, number_players_playing, rotation_stats
+            team_members_remaining, inactive_player, number_players_playing, rotation_stats, hard_max_mins
         )
 
+    assert(np.isclose(sum(p.mins_metric for p in team_members_remaining.values()), 240))
+
+    if debug:
+        print_team_members(team_members_remaining)
+    # Safety check that hard max isn't violated
+    assert(max(data.mins_metric for data in team_members_remaining.values()) <= hard_max_mins)
     return {player_id: data.mins_metric for player_id, data in team_members_remaining.items()}
 
 
-def get_min_predictions(
-    data_inputs, data_accounting, recent_lag=3, recent_to_be_considered=3, average_to_recent_ratio=0.5
-):
+def get_min_predictions(data_inputs, data_accounting, recent_lag=5, average_to_recent_ratio=0.5):
     """
     Predict minutes played for a given game for each given player.
 
     :param data_inputs: The input data including any stats going into the game like MPG or recent MPG
     :param data_accounting: The accounting data for the given entries, including game id, player id, etc.
     :param recent_lag: The amount of recent games to consider for recent minutes played
-    :param recent_to_be_considered: The amount of games ago to have played to be considered relevant
     :param average_to_recent_ratio: The percent to consider for average versus recent. For example 0.7 for
         this value means the calcuation for minutes metric would be:
           0.7 * average + 0.3 * recent
@@ -670,7 +706,7 @@ def get_min_predictions(
                 continue
 
             # Get 3 things:
-            #  1) "most_recent_season_data": which represents the most recent set of stats for this player
+            #  1) "most_recent_season_date": which represents the most recent set of stats for this player
             #                                up until this game
             #  2) "date_of_last_game_played": the date of the game last played by this player before the
             #                                 current game
@@ -713,8 +749,7 @@ def get_min_predictions(
                 if team_member_data.mins_recent_first[i] is None:
                      continue
 
-                """
-                # Incorporate checking for blowouts, this seemed to not help?
+                # If this is a blowout, don't count the game
                 #############################################################
                 recent_game_id = player_season.season_stats[player_season_index_of_last_game_played - i].game_id
                 if recent_game_id not in game_id_to_game:
@@ -725,11 +760,9 @@ def get_min_predictions(
                         [team_game.traditional_stats.PTS for team_game in recent_game.team_games.values()]
                     )[0]
                 )
-                scaler = np.interp(score_difference, [18, 30], [1.0, 0.0])
-                numerator += team_member_data.mins_recent_first[i] * (recent_lag - i) * scaler
-                denominator += (recent_lag - i) * scaler
+                if score_difference >= 35:
+                    continue
                 #############################################################
-                """
                 numerator += team_member_data.mins_recent_first[i] * (recent_lag - i)
                 denominator += (recent_lag - i)
             team_member_data.mins_recent_weighted_average = numerator/denominator if denominator > 0 else 0.0
@@ -744,6 +777,13 @@ def get_min_predictions(
             # from the calculation because there should be a 1 game difference between games if no games were missed.
             last_game_played_team_season_index = bisect.bisect_right(team_season_dates, date_of_last_game_played) - 1
             team_member_data.games_missed_recently = team_season_index - last_game_played_team_season_index - 1
+
+            # Store if this player is playing on a back to back. Note the first number in the "mins_recent_first"
+            # list represents the amount of minutes played in this last game
+            team_member_data.back_to_back = (
+                datetime.strptime(player_game.DATE, "%Y-%m-%d")
+                - datetime.strptime(date_of_last_game_played, "%Y-%m-%d")
+            ).days == 1
 
         # Predict minutes per player for this team in this game. These values are calculate per team-game, so
         # we can cache the results since the results apply regardless of who we're looking at.
@@ -764,44 +804,12 @@ def get_min_predictions(
 
 
         ### TODO ###
-        # 1) There should be a cap, for example if a lot of guys are out, the dudes with high mins pg already
-        #    may go from recent of like 33 to 42, which isn't reasonable. Need to propogate this downwards to other
-        #    dudes
-        #      - This can either be max for the given player (like his recent max)
-        #      - Max for any player (like 38)
-        #      - mix of both
-        # 2) Can take into account who is out better to more explicitly propogate available minutes
-        # 3) Probably makes sense to consider one (game, team) once and cache, since we're calculating all players
-        #    expectations at once, since they affect each other
-        # 4) Probably need more accurate way to remove players who aren't playing
-        # 5) If someone hasn't played in a while, can decrease his minutes probably for some ratio of "return"
-        # 6) When calculating a recent stat, if game is a blowout.. maybe don't count the game or count it less?
-        #    A dude that plays 30 mins in a 30 point game isn't really indicative of his minutes in next game
         # 7) Need to figure out how to minimize contributions of lowly dudes. If random dude X plays 1 recent game
         #    gonna show up in recents with 30 mins each for recent and will skew the average away from the guys
         #    who matter.
         #       - The trouble in resolving this is a lot of thoughts involve differentiating between a dude like
         #         this not playing, and real guys being inactive for injuries
-        # 8) I need to separate the guys who didnt play because they were inactive/hurt, and those who didn't
-        #    play because they suck. The ones that dont play because they suck should have a 0 for those games
-        #    to weight their averages better, instead of just a random "20 min" game which gives them what looks
-        #    like a consistent 20 MPG
-        # 9) I think I have a bug where if someone hasn't played for 4 games, they won't be counted? i.e. a player
-        #    returning from actual injury? Also related, is that if a player hasn't played for consecutive games
-        #    (meaning not just rest), maybe should dock him to like 75% his average or some ish.
-        # 10) I think recent_to_be_considered is invalid and should be removed. Instead, I need to consider all
-        #     guys because CJ McCollum may be out for 1 month, but when he comes back he's still gonna play 28
-        #     minutes. But I need to have a way to differentiate from a scrub who doesn't play for a month and
-        #     then plays. I think I can use average to decipher this:
-        #         - Use recents, have some consideration of when they haven't played for some time
-        #         - Use average as a metric as to whether or not they should have high expectations even after
-        #           not playing
-        #         - Probably still apply some down percentage on guys who were out for a while (first game back)
-        # 11) KEY!! More generally, I think I need to factor in average to recent as well (maybe weighted average).
-        #     I can use this to downrank guys who had random high min games but overall rarely play that much.
-        # 12) Consider back to backs (historically, and also for the given upcoming prediction)
         ############
-
 
     return data[['MIN_PREDICTION']]
 

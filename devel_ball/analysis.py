@@ -372,7 +372,6 @@ def cleanup_data(
             "The min_games_played of {} is more than the amount we track, this should be lowered."
             .format(min_games_played)
         )
-
     if train:
         # For training, we'll also remove players who didn't play in the game, and assume we would have known
         # that someone who isn't playing (likely injured) wouldn't have played anyways. Also, let's exclude
@@ -381,9 +380,6 @@ def cleanup_data(
 
     # Separate the categories into their given types
     pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats = get_categories(data)
-
-    # Cleanup the recent categories where data may be missing, and update for specified prediction_type
-    data = cleanup_recent_cats(data, rec_cats, prediction_type, recent_stat_lag)
 
     # Filter the data
     data = filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats)
@@ -394,6 +390,9 @@ def cleanup_data(
     data_X, data_Y = separate_predict_and_results_data(
         data, prediction_stat, prediction_type, prediction_cats,
     )
+
+    # Cleanup the recent categories where data may be missing, and update for specified prediction_type
+    data_X = cleanup_recent_cats(data_X, rec_cats, prediction_type, recent_stat_lag)
 
     # Add new features to potentially make use of
     data_X = add_features(data_X, prediction_stat, prediction_type)
@@ -674,6 +673,8 @@ def get_model(data):
     model_params = PARAMS['model']
     recent_stat_lag = PARAMS['recent_stat_lag']
 
+    import IPython; IPython.embed()
+
     # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
     # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
     # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
@@ -757,6 +758,9 @@ def get_model(data):
     print('\n\n{:35s}                 : {}'.format("MAE", mae))
     print('{:35s}                 : {}'.format("Baseline from average {}".format(stat_name), baseline_average))
     print('{:35s}                 : {} %\n\n'.format("Improvement over baseline", round(improvement, 2)))
+
+    import IPython; IPython.embed()
+    return model, data_pipeline
 
     ###### TODO (JS): do stuffs #####
     min_predictions = get_min_predictions(data_X, data_accounting)
