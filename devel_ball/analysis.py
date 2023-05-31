@@ -19,6 +19,7 @@ import pickle
 from keras.models import Model, Sequential
 from keras.layers import GRU, Dense, LSTM
 from keras.callbacks import EarlyStopping
+from keras import regularizers
 
 from devel_ball.models import Player
 from devel_ball.post_process import get_dk_points
@@ -56,16 +57,16 @@ PARAMS = {
     'recent_stat_lag': 6,
 
     # Parameters of the specific machine learning model
-    'model': {
-        'type': 'RIDGE_REGRESSION',
-        'parameter_iteration_mode': 'ALL',
-        'improvement_percent_gate': 0.01,
-    },
-
     # 'model': {
-    #     'type': 'NEURAL_NET',
-    #     'scan': False,
+    #     'type': 'RIDGE_REGRESSION',
+    #     'parameter_iteration_mode': 'ALL',
+    #     'improvement_percent_gate': 0.01,
     # },
+
+    'model': {
+        'type': 'NEURAL_NET',
+        'scan': False,
+    },
 
 }
 
@@ -121,6 +122,7 @@ def get_categories(data):
     return pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats
 
 
+# TODO (JS): cleanup docx and such
 def cleanup_recent_cats(data, rec_cats, prediction_type, stat_lag):
     """
     Cleanup the recent categories, where data may be missing (like if you've only played 2 games so far,
@@ -217,12 +219,38 @@ def cleanup_recent_cats(data, rec_cats, prediction_type, stat_lag):
             data.at[data_index, '{}{}_weighted_average'.format(recent_cat, suffix)] = (
                 numerator/denominator if denominator > 0.0 else row[regular_stat_name]
             )
+
+    # TODO (JS): clean
+    # Now create a separate numpy array as time-series data in a form that LSTM expects, such as:
+    #   time_series_data = np.array([
+    #       [
+    #           [0.1, 0.2, 0.3, 0.4, 0.5],  # Game 1, Time Step 1
+    #           [0.2, 0.3, 0.4, 0.5, 0.6],  # Game 1, Time Step 2
+    #           [0.2, 0.3, 0.4, 0.5, 0.6],  # Game 1, Time Step 3
+    #       ],
+    #       [
+    #           [0.1, 0.2, 0.3, 0.4, 0.5],  # Game 2, Time Step 1
+    #           [0.2, 0.3, 0.4, 0.5, 0.6],  # Game 2, Time Step 2
+    #           [0.2, 0.3, 0.4, 0.5, 0.6],  # Game 2, Time Step 3
+    #       ],
+    #   ])
+    time_series_data = np.zeros((len(data), max_lag+1, len(weighted_average_cats)))
+    for game_index, (_, row) in enumerate(data.iterrows()):
+        game_to_predict = np.zeros((max_lag+1, len(weighted_average_cats)))
+        for time_series_index in range(max_lag+1):
+            time_step = np.zeros((len(weighted_average_cats)))
+            for category_i, recent_cat in enumerate(weighted_average_cats):
+                cat = '{}{}{}'.format(recent_cat, time_series_index, suffix)
+                time_step[category_i] = row[cat]
+            game_to_predict[time_series_index] = time_step
+        time_series_data[game_index] = game_to_predict
+
     # Remove the old raw recent stats that are of no interest now that the weighted average exists
     for recent_cat in weighted_average_cats:
         for i in range(max_lag+1):
             data.pop('{}{}{}'.format(recent_cat, i, suffix))
 
-    return data
+    return data, time_series_data
 
 
 def filter_data_by_prediction_type(data, prediction_type, pg_cats, pm_cats, pp_cats):
@@ -334,34 +362,14 @@ def add_features(data, prediction_stat, prediction_type):
     return data
 
 
-def cleanup_data(
-    data,
-    prediction_stat,
-    prediction_type,
-    prediction_cats,
-    data_pipeline=None,
-    train=True,
-    min_MPG=15.,
-    min_games_played=5,
-    recent_stat_lag=10,
-):
+# TODO (JS): cleanup below 2 docx
+def filter_data(data, train=True, min_MPG=15., min_games_played=5):
     """
-    Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
-
-    :param data: The input data to cleanup
-    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
-    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
-    :param prediction_cats: The categories that could possibly be predicted
-    :param data_pipline: If provided, use this as the data cleanup pipeline, if not provided, then
-        create the data cleanup pieline
+    TODO
     :param bool train: Whether or not this is a part of training
     :param min_MPG: the minimum MPG to include a player in the data
     :param min_games_played: the minimum games played thus far this year to include the player in the data
-    :param recent_stat_lag: the amount of recent games to consider for weighted averages of recent stats
-
-    :returns: data_X, data_Y, data_accounting, data_pipeline
     """
-
     # Filter out players who haven't played the adequate amount of minute of games
     data = data[data['MINpg'] >=  min_MPG]
     try:
@@ -374,9 +382,33 @@ def cleanup_data(
         )
     if train:
         # For training, we'll also remove players who didn't play in the game, and assume we would have known
-        # that someone who isn't playing (likely injured) wouldn't have played anyways. Also, let's exclude
-        # players who haven't played 5 games yet this season.
+        # that someone who isn't playing (likely injured) wouldn't have played anyways.
         data = data[data['MIN'] > 0.0]
+
+    return data.reset_index()
+
+
+def cleanup_data(
+    data,
+    prediction_stat,
+    prediction_type,
+    prediction_cats,
+    data_pipeline=None,
+    recent_stat_lag=10,
+):
+    """
+    Prepare the raw input data for usage by the model. Create the data_pipeline if one is provided.
+
+    :param data: The input data to cleanup
+    :param prediction_stat: The stat that will be predicted (DK_POINTS, PTS, REBS, ...)
+    :param prediction_type: The type of prediction to make (per game, per minute, per possession)
+    :param prediction_cats: The categories that could possibly be predicted
+    :param data_pipline: If provided, use this as the data cleanup pipeline, if not provided, then
+        create the data cleanup pieline
+    :param recent_stat_lag: the amount of recent games to consider for weighted averages of recent stats
+
+    :returns: data_X, data_Y, data_accounting, data_pipeline
+    """
 
     # Separate the categories into their given types
     pg_cats, pm_cats, pp_cats, rec_cats, accounting_cats = get_categories(data)
@@ -392,7 +424,7 @@ def cleanup_data(
     )
 
     # Cleanup the recent categories where data may be missing, and update for specified prediction_type
-    data_X = cleanup_recent_cats(data_X, rec_cats, prediction_type, recent_stat_lag)
+    data_X, time_series_data = cleanup_recent_cats(data_X, rec_cats, prediction_type, recent_stat_lag)
 
     # Add new features to potentially make use of
     data_X = add_features(data_X, prediction_stat, prediction_type)
@@ -407,7 +439,8 @@ def cleanup_data(
         itertools.chain.from_iterable([t[2] for t in data_pipeline.transformers_])
     )
     data_X_prepared = pd.DataFrame(data_X_prepared_np, data_X.index, output_columns)
-    return data_X_prepared, data_Y, data_accounting, data_pipeline
+
+    return data_X_prepared, data_Y, data_accounting, data_pipeline, time_series_data
 
 
 def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
@@ -444,7 +477,7 @@ def filter_data_for_ml_model(data_X, data_Y, prediction_stat, prediction_type):
 
 
 def get_regression_model(
-    X_train, Y_train, X_validation, Y_validation, random, parameter_iteration_mode="ALL", improvement_percent_gate=0.005
+    X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, random, parameter_iteration_mode="ALL", improvement_percent_gate=0.005
 ):
 
     parameter_iteration_mode = ParameterIterationMode[parameter_iteration_mode]
@@ -570,7 +603,7 @@ def get_regression_model(
     return ridge_reg
 
 
-def _get_scanned_neural_net_model(X_train, Y_train, X_validation, Y_validation, **ignored_kwargs):
+def _get_scanned_neural_net_model(X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, **ignored_kwargs):
 
     def build_model(x_train, y_train, x_val, y_val, params):
         input_layer = keras.layers.Input(x_train.shape[1:])
@@ -626,8 +659,41 @@ def _get_scanned_neural_net_model(X_train, Y_train, X_validation, Y_validation, 
     #    pickle.dump(scan.data, handle)
 
 
-def _get_basic_neural_net_model(X_train, Y_train, X_validation, Y_validation, **ignored_kwargs):
+def _get_basic_neural_net_model(X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, **ignored_kwargs):
 
+    # TODO (JS): mess with these layers
+    time_series_input = keras.layers.Input(shape=X_train_time_series_data.shape[1:], name='time_series_input')
+    rnn_output = keras.layers.LSTM(128, return_sequences=True, kernel_regularizer=regularizers.l2(0.01))(time_series_input)
+    rnn_output = keras.layers.Dropout(0.2)(rnn_output)
+    rnn_output = keras.layers.LSTM(64)(rnn_output)
+    # TODO (JS): try a 2nd dropout here maybe?
+
+    # TODO (JS): mess with these layers
+    non_time_series_input = keras.layers.Input(shape=X_train.shape[1:], name='non_time_series_input')
+    ff_output = keras.layers.Dense(64, activation='relu', kernel_regularizer=regularizers.l2(0.0005))(non_time_series_input)
+
+    combined_output = keras.layers.concatenate([rnn_output, ff_output])
+
+    predictions = keras.layers.Dense(1, activation='linear')(combined_output)
+
+    model = keras.Model(inputs=[time_series_input, non_time_series_input], outputs=[predictions])
+
+    model.compile(optimizer='adam', loss='mean_absolute_error')
+
+    early_stopping_cb = keras.callbacks.EarlyStopping(monitor="val_loss", patience=8, restore_best_weights=True)
+
+    model.fit(
+        {"time_series_input": X_train_time_series_data, "non_time_series_input": X_train},
+        Y_train,
+        epochs=200,
+        batch_size=80,
+        validation_data=({"time_series_input": X_validation_time_series_data, "non_time_series_input": X_validation}, Y_validation),
+        callbacks=[early_stopping_cb]
+    )
+
+    return model
+
+    """
     # Create the model's layers
     input_ = keras.layers.Input(shape=X_train.shape[1:])
     hidden1 = keras.layers.Dense(150, activation="relu")(input_)
@@ -650,16 +716,17 @@ def _get_basic_neural_net_model(X_train, Y_train, X_validation, Y_validation, **
     )
 
     return model
-
+    """
 
 def get_neural_net_model(
-    X_train, Y_train, X_validation, Y_validation, random, train_to_valid_ratio=0.85, scan=False, **params
+    X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, random, train_to_valid_ratio=0.85, scan=False, **params
 ):
     model_creator = _get_scanned_neural_net_model if scan else _get_basic_neural_net_model
-    return model_creator(X_train, Y_train, X_validation, Y_validation, **params)
+    return model_creator(X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, **params)
 
 
-def get_model(data):
+# TODO (JS): consider removing features that have no correlation.. maybe automate/iteratively?
+def get_model(raw_data):
 
     # Pull the "parameters"
     min_MPG = PARAMS['min_MPG']
@@ -673,19 +740,18 @@ def get_model(data):
     model_params = PARAMS['model']
     recent_stat_lag = PARAMS['recent_stat_lag']
 
-    import IPython; IPython.embed()
+    # TODO (JS): cleanup docx
+    # Filter out data as desired
+    data = filter_data(raw_data, train=True, min_MPG=min_MPG, min_games_played=min_games_played)
 
     # Get the cleaned data, as well as the data pipeline to use to clean it. The return values here include
     # all the possible prediction data in data_X, and then all the things that can be predicted in data_Y, for
     # example if predictiong PTS and PM (per minute), then data_Y includes MIN and PTSpm.
-    data_X_initial, data_Y_initial, data_accounting, data_pipeline = cleanup_data(
+    data_X_initial, data_Y_initial, data_accounting, data_pipeline, time_series_data = cleanup_data(
         data,
         prediction_stat=prediction_stat,
         prediction_type=prediction_type,
         prediction_cats=prediction_cats,
-        train=True,
-        min_MPG=min_MPG,
-        min_games_played=min_games_played,
         recent_stat_lag=recent_stat_lag,
     )
 
@@ -700,8 +766,10 @@ def get_model(data):
         data_Y,
         train_size=train_to_test_ratio,
         shuffle=True,
-        random_state=None if random else 42,
+        random_state=None if random else 42
     )
+    X_train_full_time_series_data = time_series_data[list(X_train_full.index)]
+    X_test_time_series_data = time_series_data[list(X_test.index)]
 
     # Split the train data into train and validation data
     X_train, X_validation, Y_train, Y_validation = train_test_split(
@@ -711,6 +779,8 @@ def get_model(data):
         shuffle=True,
         random_state=None if random else 42,
     )
+    X_train_time_series_data = time_series_data[list(X_train.index)]
+    X_validation_time_series_data = time_series_data[list(X_validation.index)]
 
     # Create the model depending on specified type
     model_creator = {
@@ -719,7 +789,7 @@ def get_model(data):
     }[ModelType[model_params['type']]]
     print("Creating model of type: {}\n".format(model_params['type']))
     model_params.pop('type')
-    model = model_creator(X_train, Y_train, X_validation, Y_validation, random=random, **model_params)
+    model = model_creator(X_train, X_train_time_series_data, Y_train, X_validation, X_validation_time_series_data, Y_validation, random=random, **model_params)
 
     # Get baseline by just looking at the given average for the category
     raw_test_data = data[data.index.isin(X_test.index)]
@@ -752,7 +822,9 @@ def get_model(data):
     baseline = baseline.reindex(X_test.index)
 
     # Test model
-    mae = mean_absolute_error(Y_test, model.predict(X_test))
+    # TODO (JS): fix this to work for both types of "model.predict" with both data types
+    mae = mean_absolute_error(Y_test, model.predict({"time_series_input": X_test_time_series_data, "non_time_series_input": X_test}))
+    # mae = mean_absolute_error(Y_test, model.predict(X_test))
     baseline_average = mean_absolute_error(Y_test, baseline)
     improvement = 100 * (baseline_average - mae) / baseline_average
     print('\n\n{:35s}                 : {}'.format("MAE", mae))
@@ -784,8 +856,8 @@ def residual_plot(model, X_test, Y_test):
     plt.show()
 
 
-def predict_from_model(model, data_pipeline, data):
-
+def predict_from_model(model, data_pipeline, raw_data):
+    data = filter_data(raw_data, train=False)
     data_X, _, data_accounting, _ = cleanup_data(data, data_pipeline=data_pipeline, train=False)
     if len(data_accounting) == 0:
         return {}

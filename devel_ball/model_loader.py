@@ -22,6 +22,7 @@ from nba_api.stats.endpoints import (
     boxscoreadvancedv2,
     boxscoreusagev2,
     gamerotation,
+    commonplayerinfo,
 )
 
 from .models import (
@@ -91,8 +92,6 @@ def add_entry_to_db(document_type, unique_id, name, year, game_id):
     else:
         entry = document_type(unique_id=unique_id)
         entry.name = name
-        # TEST THIS JEREMY
-        raise Exception
         if document_type == Player:
             player_doc = query_nba_api(
                 commonplayerinfo.CommonPlayerInfo, player_id=unique_id
@@ -348,7 +347,7 @@ def get_games(years):
 
                 # If game is still happening, skip
                 if str.lower(
-                    box_score_summary.game_summary.get_data_frame().GAME_STATUS_TEXT[0]
+                    box_score_summary.game_summary.get_data_frame().GAME_STATUS_TEXT[0].strip()
                 ) != 'final':
                     print("Game is still happening, skipping for now.\n")
                     continue
